@@ -122,13 +122,13 @@ class WindService:
 
         # Generate and encode the plot
         image_base64 = self._generate_plot(lats, lons, wind_speed_knots, u_knots, v_knots, 
-                                         min_lat, max_lat, min_lon, max_lon, u_grb.validDate)
+                                         min_lat, max_lat, min_lon, max_lon, u_grb.validDate, grib_info)
 
         grbs.close()
         return data_points, image_base64, u_grb.validDate, grib_info
 
     def _generate_plot(self, lats, lons, wind_speed_knots, u_knots, v_knots, 
-                      min_lat, max_lat, min_lon, max_lon, valid_time):
+                      min_lat, max_lat, min_lon, max_lon, valid_time, grib_info):
         """Generate a wind map plot with wind barbs"""
         # Create figure and axis with projection
         fig = plt.figure(figsize=(12, 8))
@@ -180,7 +180,7 @@ class WindService:
         
         # Add colorbar
         cbar = plt.colorbar(cs, ax=ax, orientation='horizontal', pad=0.05)
-        cbar.set_label('Wind Speed (knots)', fontsize=10)
+        cbar.set_label('Wind Speed (knots)', fontsize=15)
         
         # Calculate grid for wind barbs
         target_barbs = 20  # Target number of barbs in each direction
@@ -225,13 +225,14 @@ class WindService:
         # Set map extent
         ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=ccrs.PlateCarree())
         
-        # Add title with valid time
-        title = f'Wind Speed and Direction\nValid: {valid_time.strftime("%Y-%m-%d %H:%M UTC")}'
+        # Add title with GRIB file info
+        title = f'Wind Speed and Direction\nGFS {grib_info.cycle_time}, Downloaded: {grib_info.download_time.strftime("%Y-%m-%d %H:%M UTC")}'
         plt.title(title, pad=20)
         
         # Save plot to bytes buffer
         buf = BytesIO()
-        plt.savefig(buf, format='png', bbox_inches='tight', dpi=300)
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=150, 
+                   pil_kwargs={'optimize': True, 'quality': 85})
         plt.close()
         
         # Convert to base64
