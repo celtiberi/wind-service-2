@@ -15,16 +15,12 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Place your GFS GRIB file in the `gribs` directory:
-- The file should be named `gfs.t12z.pgrb2.0p25.f000.grib2`
-- Or update the filename in `app/services/wind_service.py`
-
-4. Run the API:
+3. Run the API:
 ```bash
 uvicorn app.main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`
+The API will be available at `http://localhost:8000`. The service automatically downloads and updates GRIB files from NOAA's GFS system. When new data is not yet available, the API will return a 503 status code.
 
 ## API Endpoints
 
@@ -53,9 +49,23 @@ Response:
         },
         ...
     ],
-    "image_base64": "base64_encoded_png_image"
+    "image_base64": "base64_encoded_png_image",
+    "grib_file": {
+        "filename": "gfs.t12z.pgrb2.0p25.f000",
+        "cycle_time": "12z",
+        "download_time": "2024-03-22T12:30:00",
+        "forecast_hour": 0
+    }
 }
 ```
+
+The response includes:
+- `valid_time`: When the forecast is valid for
+- `data_points`: Array of wind data points in the requested region
+- `image_base64`: PNG visualization of wind speed and direction using wind barbs
+- `grib_file`: Information about the GRIB file used for the data
+
+If the GRIB files are not ready, the API will return a 503 Service Unavailable status.
 
 ### GET /health
 Health check endpoint.
@@ -76,8 +86,8 @@ weather-service/
 │   │   └── schemas.py
 │   └── services/
 │       └── wind_service.py
-├── gribs/
-│   └── gfs.t12z.pgrb2.0p25.f000.grib2
+├── gfs_atmos_p25/
+│   └── gfs.t12z.pgrb2.0p25.f000
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
@@ -86,8 +96,10 @@ weather-service/
 └── pyproject.toml
 ```
 
+## Example Usage
 
-# With curl
+Using curl to save the wind map visualization:
+```bash
 curl -X POST "http://localhost:8000/wind-data" \
   -H "Content-Type: application/json" \
   -d '{
@@ -96,3 +108,4 @@ curl -X POST "http://localhost:8000/wind-data" \
     "min_lon": -87.537,
     "max_lon": -66.356
   }' | jq -r '.image_base64' | base64 -d > wind_map.png
+```
