@@ -1,0 +1,3 @@
+"""
+Wind Data API package
+""" 
