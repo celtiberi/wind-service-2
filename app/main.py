@@ -30,7 +30,7 @@ except Exception as e:
 def get_bbox_by_name(name: str) -> dict:
     """Get bounding box by name from shapefiles or Nominatim API with buffer for small areas."""
     name_lower = name.lower()
-    buffer = 1.0  # 1-degree buffer for small areas (adjust as needed)
+    buffer = 3.0  # 1-degree buffer for small areas (adjust as needed)
 
     # Define the shapefiles to check with their name columns
     shapefiles = [

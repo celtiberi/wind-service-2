@@ -4,15 +4,15 @@ This API provides wind data and visualizations for specified geographical region
 
 ## Setup
 
-1. Create a virtual environment and activate it:
+1. Create and activate a conda environment:
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+conda create -n weather-service python=3.12
+conda activate weather-service
 ```
 
 2. Install dependencies:
 ```bash
-pip install -r requirements.txt
+conda install --file requirements.txt
 ```
 
 3. Run the API:
