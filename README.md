@@ -109,3 +109,9 @@ curl -X POST "http://localhost:8000/wind-data" \
     "max_lon": -66.356
   }' | jq -r '.image_base64' | base64 -d > wind_map.png
 ```
+
+```bash
+curl -X POST "http://localhost:8000/wind-data" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > wind_map.png
+```

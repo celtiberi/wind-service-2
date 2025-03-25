@@ -1,11 +1,89 @@
+from functools import lru_cache
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.models.schemas import BoundingBox, WindDataResponse, WindDataPoint, GribFileInfo
+from app.models.schemas import BoundingBox, WindDataResponse, WindDataPoint, GribFileInfo, LocationRequest
 from app.services.wind_service import WindService
 from app.tools.polling import poll_gfs_data, stop_polling, set_download_all_files, start_polling
 from typing import List
 from datetime import datetime
 import json
+import geopandas as gpd
+from pathlib import Path
+import time
+import requests
+
+# Get the project root directory (where main.py is)
+PROJECT_ROOT = Path(__file__).parent.parent
+
+# Load GeoDataFrames once at startup
+try:
+    MARINE_GDF = gpd.read_file(PROJECT_ROOT / "app" / "natural_earth" / "ne_10m_geography_marine_polys.shp")
+    COUNTRIES_GDF = gpd.read_file(PROJECT_ROOT / "app" / "natural_earth" / "ne_10m_admin_0_countries.shp")
+    LAKES_GDF = gpd.read_file(PROJECT_ROOT / "app" / "natural_earth" / "ne_10m_lakes.shp")
+    print("Successfully loaded geography data files")
+except Exception as e:
+    print(f"Error loading geography data files: {e}")
+    MARINE_GDF = None
+    COUNTRIES_GDF = None
+
+@lru_cache(maxsize=128)
+def get_bbox_by_name(name: str) -> dict:
+    """Get bounding box by name from shapefiles or Nominatim API with buffer for small areas."""
+    name_lower = name.lower()
+    buffer = 1.0  # 1-degree buffer for small areas (adjust as needed)
+
+    # Define the shapefiles to check with their name columns
+    shapefiles = [
+        (MARINE_GDF, "name"),
+        (COUNTRIES_GDF, "NAME"),
+        (LAKES_GDF, "name"),
+    ]
+
+    # Loop through each shapefile
+    for gdf, name_column in shapefiles:
+        try:
+            if gdf is None:
+                continue
+            location = gdf[gdf[name_column].str.lower() == name_lower]
+            if not location.empty:
+                bbox = location.total_bounds
+                # If the area is small (e.g., an island), add buffer
+                lat_range = bbox[3] - bbox[1]
+                lon_range = bbox[2] - bbox[0]
+                if lat_range < 5 or lon_range < 5:  # Arbitrary threshold for "small"
+                    return {
+                        "min_lat": bbox[1] - buffer,
+                        "max_lat": bbox[3] + buffer,
+                        "min_lon": bbox[0] - buffer,
+                        "max_lon": bbox[2] + buffer
+                    }
+                return {"min_lat": bbox[1], "max_lat": bbox[3], "min_lon": bbox[0], "max_lon": bbox[2]}
+        except Exception as e:
+            print(f"Error checking {name_column} in shapefile: {e}")
+            continue
+
+    # Fallback to Nominatim API if no match found in shapefiles
+    url = "https://nominatim.openstreetmap.org/search"
+    params = {"q": name, "format": "json", "limit": 1}
+    headers = {"User-Agent": "WindDataAPI/1.0 (your-email@example.com)"}  # Replace with your email
+    response = requests.get(url, params=params, headers=headers)
+    data = response.json()
+    if data and "boundingbox" in data[0]:
+        bbox = [float(x) for x in data[0]["boundingbox"]]
+        # Add buffer for small areas (e.g., islands)
+        lat_range = bbox[1] - bbox[0]
+        lon_range = bbox[3] - bbox[2]
+        if lat_range < 5 or lon_range < 5:
+            return {
+                "min_lat": bbox[0] - buffer,
+                "max_lat": bbox[1] + buffer,
+                "min_lon": bbox[2] - buffer,
+                "max_lon": bbox[3] + buffer
+            }
+        return {"min_lat": bbox[0], "max_lat": bbox[1], "min_lon": bbox[2], "max_lon": bbox[3]}
+
+    raise ValueError(f"Location '{name}' not found")
+
 
 app = FastAPI(
     title="Wind Data API",
@@ -88,6 +166,7 @@ async def shutdown_event():
     summary="Get wind data and visualization",
     description="""
     Retrieve wind data and generate a visualization for a specified geographical region.
+    You can specify the region either by coordinates or by name (e.g., 'Caribbean Sea').
     
     The endpoint returns:
     * Wind speed data points for each grid location
@@ -126,6 +205,14 @@ async def shutdown_event():
                 }
             }
         },
+        404: {
+            "description": "Location not found",
+            "content": {
+                "application/json": {
+                    "example": {"detail": "Location 'Unknown Sea' not found in geography database"}
+                }
+            }
+        },
         503: {
             "description": "Service temporarily unavailable - GRIB files not yet available",
             "content": {
@@ -144,12 +231,12 @@ async def shutdown_event():
         }
     }
 )
-async def get_wind_data(bounding_box: BoundingBox):
+async def get_wind_data(request: BoundingBox):
     """
-    Get wind data and visualization for a given bounding box.
+    Get wind data and visualization for a specified region.
     
     Args:
-        bounding_box: The bounding box coordinates defining the region of interest
+        request: Either coordinates (min_lat, max_lat, min_lon, max_lon) or a location name
         
     Returns:
         WindDataResponse containing:
@@ -159,7 +246,7 @@ async def get_wind_data(bounding_box: BoundingBox):
         - grib_file: Information about the GRIB file used
         
     Raises:
-        HTTPException: If there's an error processing the request
+        HTTPException: If the location is not found or there's an error processing the request
     """
     try:
         if not wind_service.is_ready():
@@ -168,11 +255,28 @@ async def get_wind_data(bounding_box: BoundingBox):
                 detail="GRIB files not yet available. Please try again in a few minutes."
             )
             
+        # Get coordinates either from name or direct input
+        if request.name:
+            try:
+                bbox = get_bbox_by_name(request.name)
+                min_lat, max_lat, min_lon, max_lon = (
+                    bbox["min_lat"],
+                    bbox["max_lat"],
+                    bbox["min_lon"],
+                    bbox["max_lon"]
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+        else:
+            min_lat, max_lat, min_lon, max_lon = (
+                request.min_lat,
+                request.max_lat,
+                request.min_lon,
+                request.max_lon
+            )
+            
         data_points, image_base64, valid_time, grib_info = wind_service.process_wind_data(
-            bounding_box.min_lat,
-            bounding_box.max_lat,
-            bounding_box.min_lon,
-            bounding_box.max_lon
+            min_lat, max_lat, min_lon, max_lon
         )
         
         return WindDataResponse(
