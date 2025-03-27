@@ -72,11 +72,12 @@ class WindDataResponse(BaseModel):
     data_points: List[WindDataPoint]
     image_base64: str
     grib_file: GribFile
+    description: Optional[str] = None
 
 class MarineHazardsResponse(BaseModel):
-    valid_time: datetime
-    data_points: List[PrecipitationDataPoint]
+    data_points: List[DataPoint]
     image_base64: str
-    grib_file: GribFile
+    valid_time: datetime
+    grib_info: GribFile
     storm_indicators: Dict
     description: str  

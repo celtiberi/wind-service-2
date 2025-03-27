@@ -142,8 +142,8 @@ class ProcessWindData(ProcessWeatherData):
             vmin, vmax = 0, 40
             label = 'Wind Speed (knots)'
             title = (f'Wind Speed and Direction\n'
-                     f'GFS {grib_file.cycle_time}, Valid: {valid_time.strftime("%Y-%m-%d %H:%M UTC")}\n'
-                     f'Downloaded: {grib_file.download_time.strftime("%Y-%m-%d %H:%M UTC")}')
+                     f'GFS {grib_file.metadata.cycle}, Resolution: {grib_file.metadata.resolution}, Valid: {valid_time.strftime("%Y-%m-%d %H:%M UTC")}\n'
+                     f'Downloaded: {grib_file.download_time}')
             logger.debug("Set up wind colormap and parameters")
         except Exception as e:
             logger.error(f"Error setting up wind colormap: {e}", exc_info=True)

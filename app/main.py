@@ -272,6 +272,7 @@ async def get_wind_data(request: BoundingBox):
         - data_points: List of wind data points with latitude, longitude, and wind speed
         - image_base64: Base64 encoded PNG image of the wind map
         - grib_file: Information about the GRIB file used
+        - description: Text description of current conditions
         
     Raises:
         HTTPException: If the location is not found or there's an error processing the request
@@ -303,7 +304,7 @@ async def get_wind_data(request: BoundingBox):
                 request.max_lon
             )
             
-        data_points, image_base64, valid_time, grib_info = wind_service.process_wind_data(
+        data_points, image_base64, valid_time, grib_file, description = wind_service.process_wind_data(
             min_lat, max_lat, min_lon, max_lon
         )
         
@@ -311,7 +312,8 @@ async def get_wind_data(request: BoundingBox):
             valid_time=valid_time,
             data_points=data_points,
             image_base64=image_base64,
-            grib_file=grib_info
+            grib_file=grib_file,
+            description=description
         )
     except HTTPException:
         raise
@@ -329,7 +331,7 @@ async def get_wind_data(request: BoundingBox):
     * data_points: List of PrecipitationDataPoint objects containing latitude, longitude and precipitation_rate_mmh
     * image_base64: Base64-encoded PNG image of the precipitation visualization
     * valid_time: Datetime when the data is valid for
-    * grib_info: GribFileInfo object with filename, cycle time, download time and forecast hour
+    * grib_file: GribFile object with path, download time and metadata
     * storm_indicators: Dictionary of storm risk indicators and their detailed values
     * description: Text description of current storm conditions and hazards
     
@@ -362,10 +364,13 @@ async def get_wind_data(request: BoundingBox):
                         ],
                         "image_base64": "base64_encoded_png_image",
                         "grib_file": {
-                            "filename": "gfs.t12z.pgrb2.0p25.f000",
-                            "cycle_time": "t12z",
+                            "path": "gfs.t12z.pgrb2.0p25.f000",
                             "download_time": "2024-03-22T12:30:00",
-                            "forecast_hour": 0
+                            "metadata": {
+                                "cycle": "t12z",
+                                "resolution": "0p25",
+                                "forecast_hour": "f000"
+                            }
                         },
                         "storm_indicators": {
                             "heavy_rain_risk": True,
@@ -415,7 +420,6 @@ async def get_wind_data(request: BoundingBox):
         }
     }
 )
-
 async def get_marine_hazards(request: BoundingBox):
     """
     Get precipitation data, visualization, and storm indicators for a specified region.
@@ -424,12 +428,13 @@ async def get_marine_hazards(request: BoundingBox):
         request: Either coordinates (min_lat, max_lat, min_lon, max_lon) or a location name
         
     Returns:
-        PrecipitationDataResponse containing:
+        MarineHazardsResponse containing:
         - valid_time: The valid time of the data
         - data_points: List of precipitation data points with latitude, longitude, and precipitation rate
         - image_base64: Base64 encoded PNG image of the precipitation map with storm indicators
         - grib_file: Information about the GRIB file used
         - storm_indicators: Dictionary of storm-related indicators
+        - description: Text description of current conditions
         
     Raises:
         HTTPException: If the location is not found or there's an error processing the request
@@ -461,20 +466,18 @@ async def get_marine_hazards(request: BoundingBox):
                 request.max_lon
             )
             
-        data_points, image_base64, valid_time, grib_info, storm_indicators, description = wind_service.process_marine_hazards(
-            min_lat, max_lat, min_lon, max_lon)
+        data_points, image_base64, valid_time, grib_file, storm_indicators, description = wind_service.process_marine_hazards(
+            min_lat, max_lat, min_lon, max_lon
+        )
         
         return MarineHazardsResponse(
+            valid_time=valid_time,
             data_points=data_points,
             image_base64=image_base64,
-            valid_time=valid_time,
-            grib_info=grib_info,
+            grib_file=grib_file,
             storm_indicators=storm_indicators,
             description=description
         )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing marine hazards: {str(e)}")
-    
     except HTTPException:
         raise
     except Exception as e:
