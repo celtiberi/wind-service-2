@@ -1,7 +1,7 @@
 import pygrib
 
 # Path to your downloaded file
-grib_file = 'gfs.t12z.pgrb2.0p25.f000.grib2'  # Adjust if renamed (e.g., add .grib2)
+grib_file = 'gfs_atmos_p25/gfs.t12z.pgrb2.0p25.f000'  # Adjust if renamed (e.g., add .grib2)
 
 # Open the GRIB file
 try:
@@ -13,8 +13,12 @@ except Exception as e:
 
 # List all parameters
 print("\nAvailable parameters in the file:")
-for grb in grbs:
-    print(f"Name: {grb.name}, Level: {grb.level} {grb.typeOfLevel}, Units: {grb.units}, Forecast Hour: {grb.forecastTime}")
+# Open file for writing
+with open('variables.txt', 'w') as f:
+    for grb in grbs:
+        line = f"Name: {grb.name}, Level: {grb.level} {grb.typeOfLevel}, Units: {grb.units}, Forecast Hour: {grb.forecastTime}"
+        print(line)
+        f.write(line + '\n')
 
 # Close the file
 grbs.close()

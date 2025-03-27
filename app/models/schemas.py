@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field, validator
-from typing import List, Optional
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 
 class LocationRequest(BaseModel):
@@ -25,19 +25,58 @@ class BoundingBox(BaseModel):
             raise ValueError("Either name or coordinates must be provided")
         return v
 
+
+
+class PrecipitationDataPoint(BaseModel):
+    latitude: float
+    longitude: float
+    precipitation_rate_mmh: float
+
+class DataPoint(BaseModel):
+    latitude: float
+    longitude: float
+    wind_speed_knots: float
+    precipitation_rate_mmh: Optional[float] = None
+
+      
+
+# GRIB-related schemas
+class AtmosMetadata(BaseModel):
+    cycle: str  # e.g., "t06z"
+    resolution: str  # e.g., "0p25"
+    forecast_hour: str  # e.g., "f000"
+
+class WaveMetadata(BaseModel):
+    cycle: str  # e.g., "t06z"
+    resolution: str  # e.g., "0p16"
+    domain: str  # e.g., "global"
+    forecast_hour: str  # e.g., "f000"
+
+class GribFile(BaseModel):
+    path: str
+    download_time: str
+    metadata: Union[AtmosMetadata, WaveMetadata]
+
+class GribsData(BaseModel):
+    atmos: Optional[GribFile] = None
+    wave: Optional[GribFile] = None        
+
+
 class WindDataPoint(BaseModel):
     latitude: float
     longitude: float
     wind_speed_knots: float
 
-class GribFileInfo(BaseModel):
-    filename: str
-    cycle_time: str  # e.g., "t12z"
-    download_time: datetime
-    forecast_hour: int  # e.g., 0 for f000
-
 class WindDataResponse(BaseModel):
     valid_time: datetime
     data_points: List[WindDataPoint]
     image_base64: str
-    grib_file: GribFileInfo 
+    grib_file: GribFile
+
+class MarineHazardsResponse(BaseModel):
+    valid_time: datetime
+    data_points: List[PrecipitationDataPoint]
+    image_base64: str
+    grib_file: GribFile
+    storm_indicators: Dict
+    description: str  
