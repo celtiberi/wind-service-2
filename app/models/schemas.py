@@ -92,7 +92,7 @@ class WaveDataResponse(BaseModel):
     data_points: List[WaveDataPoint]
     image_base64: str
     grib_file: GribFile
-    description: Optional[str] = None
+    description: str
     
 class MarineHazardsResponse(BaseModel):
     data_points: List[DataPoint]

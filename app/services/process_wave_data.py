@@ -13,7 +13,7 @@ from .process_weather_data import ProcessWeatherData, logger
 from app.models.schemas import GribFile
 
 class ProcessWaveData(ProcessWeatherData):
-    def process_data(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float, unit: str = "feet") -> Tuple[List[dict], str, datetime, GribFile, Optional[Dict]]:
+    def process_data(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float, unit: str = "feet") -> Tuple[List[dict], str, datetime, GribFile, Optional[Dict], str]:
         logger.info(f"Processing wave data for bounding box: ({min_lat}, {max_lat}, {min_lon}, {max_lon}) with unit: {unit}")
         
         if not self._wave_grib or not self._wave_grib_file_data:
@@ -91,7 +91,52 @@ class ProcessWaveData(ProcessWeatherData):
             logger.error(f"Error generating wave plot: {e}", exc_info=True)
             raise Exception(f"Error generating wave plot: {e}")
 
-        return data_points, image_base64, height_grb.validDate, self._wave_grib_file_data, None
+        # Generate text description
+        try:
+            max_height = np.nanmax(height_data)
+            min_height = np.nanmin(height_data)
+            mean_height = np.nanmean(height_data)
+            mean_period = np.nanmean(period_data)
+            mean_direction = np.nanmean(dir_data)
+            
+            # Convert direction to cardinal directions
+            directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 
+                         'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW']
+            dir_index = round(mean_direction / 22.5) % 16
+            cardinal_dir = directions[dir_index]
+            
+            # Generate description based on wave heights
+            if unit == "feet":
+                if max_height < 2:
+                    height_desc = "calm to light chop"
+                elif max_height < 4:
+                    height_desc = "moderate waves"
+                elif max_height < 8:
+                    height_desc = "rough seas"
+                else:
+                    height_desc = "very rough to high seas"
+            else:
+                if max_height < 0.6:
+                    height_desc = "calm to light chop"
+                elif max_height < 1.2:
+                    height_desc = "moderate waves"
+                elif max_height < 2.4:
+                    height_desc = "rough seas"
+                else:
+                    height_desc = "very rough to high seas"
+            
+            description = (
+                f"Wave conditions in the region show {height_desc} with significant wave heights "
+                f"ranging from {min_height:.1f} to {max_height:.1f} {unit} "
+                f"(average {mean_height:.1f} {unit}). "
+                f"Waves are moving {cardinal_dir} with an average period of {mean_period:.1f} seconds."
+            )
+            logger.info("Generated wave conditions description")
+        except Exception as e:
+            logger.error(f"Error generating description: {e}", exc_info=True)
+            description = "Unable to generate wave conditions description"
+
+        return data_points, image_base64, height_grb.validDate, self._wave_grib_file_data, description, None
     
     def _generate_plot(self, lats: np.ndarray, lons: np.ndarray, data_field: np.ndarray, 
                       min_lat: float, max_lat: float, min_lon: float, max_lon: float, 

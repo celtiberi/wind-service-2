@@ -236,6 +236,7 @@ async def get_marine_hazards(request: BoundingBox):
     * A base64-encoded PNG image of the wave map with direction arrows
     * The valid time of the data
     * Information about the GRIB file used
+    * A text description of current wave conditions
     
     The wave map includes:
     * Color-coded significant wave height visualization
@@ -271,7 +272,8 @@ async def get_marine_hazards(request: BoundingBox):
                                 "resolution": "0p16",
                                 "forecast_hour": "f000"
                             }
-                        }
+                        },
+                        "description": "Wave conditions in the region show moderate waves with significant wave heights ranging from 1.2 to 2.5 feet (average 1.8 feet). Waves are moving NE with an average period of 8.2 seconds."
                     }
                 }
             }
@@ -304,7 +306,7 @@ async def get_wave_data(request: BoundingBox):
         - data_points: List of wave data points with latitude, longitude, height, period, and direction
         - image_base64: Base64 encoded PNG image of the wave map
         - grib_file: Information about the GRIB file used
-        - description: Text description of current conditions (optional)
+        - description: Text description of current wave conditions
         
     Raises:
         HTTPException: If the location is not found or there's an error processing the request
@@ -326,7 +328,7 @@ async def get_wave_data(request: BoundingBox):
                 request.min_lat, request.max_lat, request.min_lon, request.max_lon
             )
             
-        data_points, image_base64, valid_time, grib_file, description = weather_service.process_wave_data(
+        data_points, image_base64, valid_time, grib_file, description, _ = weather_service.process_wave_data(
             min_lat, max_lat, min_lon, max_lon, unit=request.unit
         )
         
