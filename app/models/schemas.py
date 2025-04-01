@@ -11,6 +11,7 @@ class BoundingBox(BaseModel):
     max_lat: Optional[float] = Field(None, ge=-90, le=90, description="Maximum latitude")
     min_lon: Optional[float] = Field(None, ge=-180, le=180, description="Minimum longitude")
     max_lon: Optional[float] = Field(None, ge=-180, le=180, description="Maximum longitude")
+    unit: Optional[str] = Field("feet", description="Unit for wave height: 'meters' or 'feet'")
 
     @validator('min_lat', 'max_lat', 'min_lon', 'max_lon')
     def validate_coordinates(cls, v, values):
@@ -25,7 +26,11 @@ class BoundingBox(BaseModel):
             raise ValueError("Either name or coordinates must be provided")
         return v
 
-
+    @validator('unit')
+    def validate_unit(cls, v):
+        if v not in ["meters", "feet"]:
+            raise ValueError("Unit must be 'meters' or 'feet'")
+        return v
 
 class PrecipitationDataPoint(BaseModel):
     latitude: float
@@ -74,6 +79,21 @@ class WindDataResponse(BaseModel):
     grib_file: GribFile
     description: Optional[str] = None
 
+# Pydantic model for wave data point
+class WaveDataPoint(BaseModel):
+    latitude: float
+    longitude: float
+    wave_height: float  # Height in the requested unit (meters or feet)
+    wave_period_s: float
+    wave_direction_deg: float
+
+class WaveDataResponse(BaseModel):
+    valid_time: datetime
+    data_points: List[WaveDataPoint]
+    image_base64: str
+    grib_file: GribFile
+    description: Optional[str] = None
+    
 class MarineHazardsResponse(BaseModel):
     data_points: List[DataPoint]
     image_base64: str

@@ -15,13 +15,13 @@ class ProcessWindData(ProcessWeatherData):
     def process_data(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> Tuple[List[dict], str, datetime, GribFile, Optional[Dict]]:
         logger.info(f"Processing wind data for bounding box: ({min_lat}, {max_lat}, {min_lon}, {max_lon})")
         
-        if not self._atmos_grib or not self._atmos_grib_file_data:
+        if not self._wave_grib or not self._atmos_grib_file_data:
             raise ValueError("Atmospheric GRIB file not available")
 
         # Extract U and V wind components
         try:
-            u_grb = self._atmos_grib.select(name='10 metre U wind component')[0]
-            v_grb = self._atmos_grib.select(name='10 metre V wind component')[0]
+            u_grb = self._wave_grib.select(name='10 metre U wind component')[0]
+            v_grb = self._wave_grib.select(name='10 metre V wind component')[0]
             logger.info("Extracted U and V wind components")
         except Exception as e:
             logger.error(f"Error extracting wind components from {self._atmos_grib_file_data.path}: {e}", exc_info=True)

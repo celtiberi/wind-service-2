@@ -115,3 +115,16 @@ curl -X POST "http://localhost:8000/wind-data" \
      -H "Content-Type: application/json" \
      -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > wind_map.png
 ```
+
+
+```bash
+curl -X POST "http://localhost:8000/wave-data" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > wave_map.png
+```
+
+```bash
+curl -X POST "http://localhost:8000/marine-hazards" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > hazards_map.png
+```

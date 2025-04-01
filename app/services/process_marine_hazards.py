@@ -15,12 +15,12 @@ class ProcessMarineHazards(ProcessWeatherData):
     def process_data(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> Tuple[List[dict], str, datetime, GribFile, Optional[Dict], str]:
         logger.info(f"Processing marine hazards for bounding box: ({min_lat}, {max_lat}, {min_lon}, {max_lon})")
         
-        if not self._atmos_grib or not self._atmos_grib_file_data:
+        if not self._wave_grib or not self._atmos_grib_file_data:
             raise ValueError("Atmospheric GRIB file not available")
 
         # Extract wind gusts
         try:
-            gust_grb = self._atmos_grib.select(name='Wind speed (gust)')[0]
+            gust_grb = self._wave_grib.select(name='Wind speed (gust)')[0]
             gust_data_full, lats_full, lons_full = gust_grb.data()
             wind_speed_knots, lats, lons = self._slice_data_to_bounding_box(gust_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
             wind_speed_knots = wind_speed_knots * 1.94384  # Convert m/s to knots
@@ -89,20 +89,20 @@ class ProcessMarineHazards(ProcessWeatherData):
 
         # Storm Potential (Heavy Rain + Instability + Reflectivity)
         try:
-            precip_grb = self._atmos_grib.select(name='Precipitation rate')[0]
+            precip_grb = self._wave_grib.select(name='Precipitation rate')[0]
             precip_data_full, _, _ = precip_grb.data()
             precip_data, lats, lons = self._slice_data_to_bounding_box(precip_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
             precip_rate_mmh = precip_data * 3600  # kg m^-2 s^-1 to mm/h
             max_precip_rate = np.nanmax(precip_rate_mmh)
             indicators["details"]["max_precipitation_rate_mmh"] = float(max_precip_rate)
 
-            cape_grb = self._atmos_grib.select(name='Convective available potential energy', typeOfLevel='pressureFromGroundLayer', level=18000)[0]
+            cape_grb = self._wave_grib.select(name='Convective available potential energy', typeOfLevel='pressureFromGroundLayer', level=18000)[0]
             cape_data_full, _, _ = cape_grb.data()
             cape_data, _, _ = self._slice_data_to_bounding_box(cape_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
             max_cape = np.nanmax(cape_data)
             indicators["details"]["max_cape_jkg"] = float(max_cape)
 
-            reflectivity_grb = self._atmos_grib.select(name='Maximum/Composite radar reflectivity')[0]
+            reflectivity_grb = self._wave_grib.select(name='Maximum/Composite radar reflectivity')[0]
             reflectivity_data_full, _, _ = reflectivity_grb.data()
             reflectivity_data, _, _ = self._slice_data_to_bounding_box(reflectivity_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
             max_reflectivity = np.nanmax(reflectivity_data)
@@ -128,7 +128,7 @@ class ProcessMarineHazards(ProcessWeatherData):
 
         # Low Visibility
         try:
-            vis_grb = self._atmos_grib.select(name='Visibility')[0]
+            vis_grb = self._wave_grib.select(name='Visibility')[0]
             vis_data_full, _, _ = vis_grb.data()
             vis_data, _, _ = self._slice_data_to_bounding_box(vis_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
             vis_nm = vis_data / 1852  # Convert m to nautical miles
@@ -142,11 +142,11 @@ class ProcessMarineHazards(ProcessWeatherData):
 
         # Icing Risk
         try:
-            frozen_grb = self._atmos_grib.select(name='Percent frozen precipitation')[0]
+            frozen_grb = self._wave_grib.select(name='Percent frozen precipitation')[0]
             frozen_data_full, _, _ = frozen_grb.data()
             frozen_data, _, _ = self._slice_data_to_bounding_box(frozen_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
 
-            temp_grb = self._atmos_grib.select(name='2 metre temperature')[0]
+            temp_grb = self._wave_grib.select(name='2 metre temperature')[0]
             temp_data_full, _, _ = temp_grb.data()
             temp_data, _, _ = self._slice_data_to_bounding_box(temp_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
             temp_c = temp_data - 273.15  # Convert K to °C
@@ -176,7 +176,7 @@ class ProcessMarineHazards(ProcessWeatherData):
 
         # Fog Risk
         try:
-            rh_grb = self._atmos_grib.select(name='2 metre relative humidity')[0]
+            rh_grb = self._wave_grib.select(name='2 metre relative humidity')[0]
             rh_data_full, _, _ = rh_grb.data()
             rh_data, _, _ = self._slice_data_to_bounding_box(rh_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
 

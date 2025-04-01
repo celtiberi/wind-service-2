@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 class ProcessWeatherData(ABC):
     def __init__(self):
         logger.info("Initializing ProcessWeatherData")
-        self._atmos_grib = None  # File handle for atmospheric GRIB file
+        self._wave_grib = None  # File handle for atmospheric GRIB file
         self._wave_grib = None   # File handle for wave GRIB file
         self._atmos_grib_file_data = None  # Metadata for atmospheric GRIB file
         self._wave_grib_file_data = None   # Metadata for wave GRIB file
@@ -48,9 +48,9 @@ class ProcessWeatherData(ABC):
         """Reload GRIB files when updates are detected"""
         try:
             # Close existing file handles if open
-            if self._atmos_grib:
-                self._atmos_grib.close()
-                self._atmos_grib = None
+            if self._wave_grib:
+                self._wave_grib.close()
+                self._wave_grib = None
             if self._wave_grib:
                 self._wave_grib.close()
                 self._wave_grib = None
@@ -60,7 +60,7 @@ class ProcessWeatherData(ABC):
             
             # Open the GRIB files
             if self._atmos_grib_file_data:
-                self._atmos_grib = pygrib.open(self._atmos_grib_file_data.path)
+                self._wave_grib = pygrib.open(self._atmos_grib_file_data.path)
                 logger.info(f"Reloaded atmospheric GRIB file: {self._atmos_grib_file_data.path}")
             if self._wave_grib_file_data:
                 self._wave_grib = pygrib.open(self._wave_grib_file_data.path)
@@ -79,7 +79,7 @@ class ProcessWeatherData(ABC):
 
     def is_ready(self) -> bool:
         """Check if required GRIB files are available"""
-        return self._atmos_grib is not None and self._atmos_grib_file_data is not None
+        return self._wave_grib is not None and self._atmos_grib_file_data is not None
 
     def _slice_data_to_bounding_box(self, data_full: np.ndarray, lats_full: np.ndarray, lons_full: np.ndarray,
                                    min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -126,8 +126,8 @@ class ProcessWeatherData(ABC):
 
     def __del__(self):
         """Cleanup when the object is destroyed"""
-        if self._atmos_grib:
-            self._atmos_grib.close()
+        if self._wave_grib:
+            self._wave_grib.close()
             logger.debug("Closed atmospheric GRIB file handle")
         if self._wave_grib:
             self._wave_grib.close()

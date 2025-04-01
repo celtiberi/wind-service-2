@@ -1,0 +1,22 @@
+Opened gribs/wave/gfswave.t12z.global.0p16.f000.grib2 successfully
+
+Available parameters in the file:
+Name: Wind speed, Level: 1 surface, Units: m s**-1, Forecast Hour: 0
+Name: Wind direction, Level: 1 surface, Units: Degree true, Forecast Hour: 0
+Name: U component of wind, Level: 1 surface, Units: m s**-1, Forecast Hour: 0
+Name: V component of wind, Level: 1 surface, Units: m s**-1, Forecast Hour: 0
+Name: Significant height of combined wind waves and swell, Level: 1 surface, Units: m, Forecast Hour: 0
+Name: Primary wave mean period, Level: 1 surface, Units: s, Forecast Hour: 0
+Name: Primary wave direction, Level: 1 surface, Units: Degree true, Forecast Hour: 0
+Name: Significant height of wind waves, Level: 1 surface, Units: m, Forecast Hour: 0
+Name: Significant height of total swell, Level: 1 orderedSequenceData, Units: m, Forecast Hour: 0
+Name: Significant height of total swell, Level: 2 orderedSequenceData, Units: m, Forecast Hour: 0
+Name: Significant height of total swell, Level: 3 orderedSequenceData, Units: m, Forecast Hour: 0
+Name: Mean period of wind waves, Level: 1 surface, Units: s, Forecast Hour: 0
+Name: Mean period of total swell, Level: 1 orderedSequenceData, Units: s, Forecast Hour: 0
+Name: Mean period of total swell, Level: 2 orderedSequenceData, Units: s, Forecast Hour: 0
+Name: Mean period of total swell, Level: 3 orderedSequenceData, Units: s, Forecast Hour: 0
+Name: Direction of wind waves, Level: 1 surface, Units: Degree true, Forecast Hour: 0
+Name: Direction of swell waves, Level: 1 orderedSequenceData, Units: Degree true, Forecast Hour: 0
+Name: Direction of swell waves, Level: 2 orderedSequenceData, Units: Degree true, Forecast Hour: 0
+Name: Direction of swell waves, Level: 3 orderedSequenceData, Units: Degree true, Forecast Hour: 0
