@@ -1,5 +1,6 @@
 # GRIB files directory
 gfs_atmos_p25/
+gribs/
 
 # Python
 __pycache__/
