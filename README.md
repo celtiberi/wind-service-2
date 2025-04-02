@@ -1,6 +1,6 @@
-# Wind Data API
+# Weather Data API
 
-This API provides wind data and visualizations for specified geographical regions using GFS (Global Forecast System) data.
+This API provides comprehensive weather data and visualizations for specified geographical regions using GFS (Global Forecast System) data.
 
 ## Setup
 
@@ -20,14 +20,20 @@ conda install --file requirements.txt
 uvicorn app.main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`. The service automatically downloads and updates GRIB files from NOAA's GFS system. When new data is not yet available, the API will return a 503 status code.
+The API will be available at `http://localhost:8000`. The service automatically processes GRIB files from NOAA's GFS system. When data is not yet available, the API will return a 503 status code.
 
 ## API Endpoints
 
 ### POST /wind-data
-Get wind data and visualization for a specified bounding box.
+Get wind data and visualization for a specified region. You can specify the region either by coordinates or by name (e.g., 'Caribbean Sea').
 
 Request body:
+```json
+{
+    "name": "Caribbean Sea"
+}
+```
+OR
 ```json
 {
     "min_lat": 37.5,
@@ -46,29 +52,69 @@ Response:
             "latitude": 37.5,
             "longitude": -72.5,
             "wind_speed_knots": 15.2
-        },
-        ...
+        }
     ],
     "image_base64": "base64_encoded_png_image",
     "grib_file": {
-        "filename": "gfs.t12z.pgrb2.0p25.f000",
-        "cycle_time": "12z",
+        "path": "gfs.t12z.pgrb2.0p25.f000",
         "download_time": "2024-03-22T12:30:00",
-        "forecast_hour": 0
-    }
+        "metadata": {
+            "cycle": "t12z",
+            "resolution": "0p25",
+            "forecast_hour": "f000"
+        }
+    },
+    "description": "Wind conditions description"
 }
 ```
 
-The response includes:
-- `valid_time`: When the forecast is valid for
-- `data_points`: Array of wind data points in the requested region
-- `image_base64`: PNG visualization of wind speed and direction using wind barbs
-- `grib_file`: Information about the GRIB file used for the data
+### POST /wave-data
+Get wave data and visualization for a specified region. Supports the same region specification methods as /wind-data.
 
-If the GRIB files are not ready, the API will return a 503 Service Unavailable status.
+Response includes wave height, period, and direction data:
+```json
+{
+    "valid_time": "2024-03-22T12:00:00",
+    "data_points": [
+        {
+            "latitude": 10.0,
+            "longitude": -65.0,
+            "wave_height": 1.5,
+            "wave_period_s": 8.2,
+            "wave_direction_deg": 45.0
+        }
+    ],
+    "image_base64": "base64_encoded_png_image",
+    "grib_file": {
+        "path": "gfswave.t12z.global.0p16.f000.grib2",
+        "download_time": "2024-03-22T12:30:00",
+        "metadata": {
+            "cycle": "t12z",
+            "resolution": "0p16",
+            "forecast_hour": "f000"
+        }
+    },
+    "description": "Wave conditions description"
+}
+```
+
+### POST /marine-hazards
+Get comprehensive marine hazards data including wind, waves, and storm indicators for a region.
+
+Response includes combined hazard data and indicators:
+```json
+{
+    "valid_time": "2024-03-22T12:00:00",
+    "data_points": [...],
+    "image_base64": "base64_encoded_png_image",
+    "grib_file": {...},
+    "storm_indicators": [...],
+    "description": "Marine hazards description"
+}
+```
 
 ### GET /health
-Health check endpoint.
+Health check endpoint returning service status.
 
 ## API Documentation
 
@@ -84,21 +130,45 @@ weather-service/
 │   ├── main.py
 │   ├── models/
 │   │   └── schemas.py
-│   └── services/
-│       └── wind_service.py
-├── gfs_atmos_p25/
-│   └── gfs.t12z.pgrb2.0p25.f000
+│   ├── services/
+│   │   ├── weather_service.py
+│   │   └── process_weather_data.py
+│   └── natural_earth/
+│       ├── ne_10m_geography_marine_polys.shp
+│       ├── ne_10m_admin_0_countries.shp
+│       └── ne_10m_lakes.shp
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py
-│   └── test_wind_api.py
+│   └── test_weather_api.py
 ├── requirements.txt
 └── pyproject.toml
 ```
 
 ## Example Usage
 
-Using curl to save the wind map visualization:
+Using curl to get wind data for the Caribbean Sea:
+```bash
+curl -X POST "http://localhost:8000/wind-data" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > wind_map.png
+```
+
+Get wave data for the Caribbean Sea:
+```bash
+curl -X POST "http://localhost:8000/wave-data" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > wave_map.png
+```
+
+Get marine hazards data:
+```bash
+curl -X POST "http://localhost:8000/marine-hazards" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > hazards_map.png
+```
+
+Using coordinates (5°x5° box in the Caribbean):
 ```bash
 curl -X POST "http://localhost:8000/wind-data" \
   -H "Content-Type: application/json" \
@@ -109,13 +179,6 @@ curl -X POST "http://localhost:8000/wind-data" \
     "max_lon": -66.356
   }' | jq -r '.image_base64' | base64 -d > wind_map.png
 ```
-
-```bash
-curl -X POST "http://localhost:8000/wind-data" \
-     -H "Content-Type: application/json" \
-     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > wind_map.png
-```
-
 
 ```bash
 curl -X POST "http://localhost:8000/wave-data" \

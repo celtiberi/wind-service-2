@@ -1,7 +1,7 @@
 import pygrib
 
 # Path to your downloaded file
-grib_file = 'atmos/gfs.t12z.pgrb2.0p25.f000'  # Adjust if renamed (e.g., add .grib2)
+grib_file = 'gribs/atmos/gfs.t12z.pgrb2.0p25.f000'  # Adjust if renamed (e.g., add .grib2)
 
 # Open the GRIB file
 try:

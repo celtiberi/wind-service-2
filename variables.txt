@@ -1,6 +1,3 @@
-Opened gribs/atmos/gfs.t12z.pgrb2.0p25.f000 successfully
-
-Available parameters in the file:
 Name: Pressure reduced to MSL, Level: 0 meanSea, Units: Pa, Forecast Hour: 0
 Name: Cloud mixing ratio, Level: 1 hybrid, Units: kg kg**-1, Forecast Hour: 0
 Name: Ice water mixing ratio, Level: 1 hybrid, Units: kg kg**-1, Forecast Hour: 0
