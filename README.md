@@ -113,6 +113,43 @@ Response includes combined hazard data and indicators:
 }
 ```
 
+### POST /marine-forecast
+Get marine forecast for a specific location or area. You can specify the location either by name, point coordinates, or bounding box coordinates.
+
+Request body:
+```json
+{
+    "name": "Caribbean Sea"
+}
+```
+OR
+```json
+{
+    "lat": 20.090,
+    "lon": -83.502
+}
+```
+OR
+```json
+{
+    "min_lat": 9.252,
+    "max_lat": 22.328,
+    "min_lon": -87.537,
+    "max_lon": -66.356
+}
+```
+
+Response:
+```json
+{
+    "forecast": "Marine forecast text...",
+    "zone_id": "AMZ046",
+    "lat": 20.090,
+    "lon": -83.502,
+    "error": null
+}
+```
+
 ### GET /health
 Health check endpoint returning service status.
 
@@ -132,7 +169,8 @@ weather-service/
 │   │   └── schemas.py
 │   ├── services/
 │   │   ├── weather_service.py
-│   │   └── process_weather_data.py
+│   │   ├── process_weather_data.py
+│   │   └── noaa_marine_forecast.py
 │   └── natural_earth/
 │       ├── ne_10m_geography_marine_polys.shp
 │       ├── ne_10m_admin_0_countries.shp
@@ -166,6 +204,32 @@ Get marine hazards data:
 curl -X POST "http://localhost:8000/marine-hazards" \
      -H "Content-Type: application/json" \
      -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > hazards_map.png
+```
+
+Get marine forecast by name:
+```bash
+curl -X POST "http://localhost:8000/marine-forecast" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "Caribbean Sea"}'
+```
+
+Get marine forecast by point:
+```bash
+curl -X POST "http://localhost:8000/marine-forecast" \
+     -H "Content-Type: application/json" \
+     -d '{"lat": 20.090, "lon": -83.502}'
+```
+
+Get marine forecast by bounding box:
+```bash
+curl -X POST "http://localhost:8000/marine-forecast" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "min_lat": 9.252,
+       "max_lat": 22.328,
+       "min_lon": -87.537,
+       "max_lon": -66.356
+     }'
 ```
 
 Using coordinates (5°x5° box in the Caribbean):
