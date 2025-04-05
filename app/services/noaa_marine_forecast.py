@@ -12,6 +12,21 @@ from pathlib import Path
 from app.models.schemas import MarineForecastResponse # Import the response model
 
 class NOAAMarineForecast:
+    HIGH_SEAS_NAME_TO_URL = {
+        'North Atlantic Ocean between 31N and 67N latitude and between the East Coast North America and 35W longitude':
+          'https://tgftp.nws.noaa.gov/data/raw/fz/fznt01.kwbc.hsf.at1.txt',
+        'Atlantic Ocean West of 35W longitude between 31N latitude and 7N latitude .  This includes the Caribbean and the Gulf of Mexico':
+          'https://tgftp.nws.noaa.gov/data/raw/fz/fznt02.knhc.hsf.at2.txt',
+        'North Pacific Ocean between 30N and the Bering Strait and between the West Coast of North America and 160E Longitude':
+          'https://tgftp.nws.noaa.gov/data/raw/fz/fzpn02.kwbc.hsf.epi.txt',
+        'Central North Pacific Ocean between the Equator and 30N latitude and between 140W longitude and 160E longitude':
+          'https://tgftp.nws.noaa.gov/data/raw/fz/fzpn40.phfo.hsf.np.txt',
+        'Eastern North Pacific Ocean between the Equator and 30N latitude and east of 140W longitude and 3.4S to Equator east of 120W longitude':
+          'https://tgftp.nws.noaa.gov/data/raw/fz/fzpn03.knhc.hsf.ep2.txt',
+        'Central South Pacific Ocean between the Equator and 25S latitude and between 120W longitude and 160E longitude':
+          'https://tgftp.nws.noaa.gov/data/raw/fz/fzps40.phfo.hsf.sp.txt',
+      }
+      
     def __init__(self):
         # Directory to store shapefiles, metadata, and forecast mappings
         self.download_dir = Path("marine_shapefiles")
@@ -185,10 +200,36 @@ class NOAAMarineForecast:
     def load_shapefiles(self, metadata):
         """Load shapefiles into a single GeoDataFrame."""
         all_zones = []
+        required_columns = ['ID', 'NAME', 'geometry'] # Ensure NAME column is considered
         for title, info in metadata.items():
-            gdf = gpd.read_file(info["filename"])
-            all_zones.append(gdf)
-        return pd.concat(all_zones, ignore_index=True)
+            try:
+                gdf = gpd.read_file(info["filename"])
+                # Standardize column names if possible (example, may need adjustment)
+                if 'id' in gdf.columns and 'ID' not in gdf.columns:
+                    gdf = gdf.rename(columns={'id': 'ID'})
+                if 'name' in gdf.columns and 'NAME' not in gdf.columns:
+                     gdf = gdf.rename(columns={'name': 'NAME'})
+                
+                # Select only necessary columns, handling potential missing ones
+                cols_to_use = [col for col in required_columns if col in gdf.columns]
+                all_zones.append(gdf[cols_to_use])
+            except Exception as e:
+                print(f"Error loading or processing shapefile {info['filename']}: {e}")
+                
+        if not all_zones:
+            raise ValueError("No valid shapefiles could be loaded.")
+        # Ensure the final concatenated GDF has at least the geometry column
+        combined_gdf = pd.concat(all_zones, ignore_index=True)
+        if 'geometry' not in combined_gdf.columns:
+            raise ValueError("Concatenated GeoDataFrame must contain a 'geometry' column.")
+            
+        # Fill missing ID/NAME columns if they exist after concat, before use
+        if 'ID' not in combined_gdf.columns:
+             combined_gdf['ID'] = pd.NA
+        if 'NAME' not in combined_gdf.columns:
+            combined_gdf['NAME'] = pd.NA
+            
+        return combined_gdf
 
     def check_for_updates(self):
         """Check if shapefiles need updating based on valid dates."""
@@ -206,15 +247,29 @@ class NOAAMarineForecast:
         return False
 
     def get_zone_for_coordinate(self, lat, lon):
-        """Find the marine zone containing the given coordinate."""
+        """Find the marine zone (ID or High Seas Name) containing the given coordinate."""
         if self.zones is None:
             raise ValueError("Zones not loaded. Call initialize() first.")
             
         point = Point(lon, lat)
         for _, zone in self.zones.iterrows():
-            if zone.geometry.contains(point):
-                return zone['ID']
-        return None
+            # Check geometry first
+            if 'geometry' in zone and zone.geometry.contains(point):
+                zone_id = zone.get('ID')
+                zone_name = zone.get('NAME')
+                
+                # Prefer standard ID if valid
+                if pd.notna(zone_id) and isinstance(zone_id, str) and zone_id.strip():
+                    return zone_id.strip()
+                    
+                # Fallback to NAME if it matches a High Seas forecast key
+                if pd.notna(zone_name) and isinstance(zone_name, str) and zone_name.strip() in self.HIGH_SEAS_NAME_TO_URL:
+                    return zone_name.strip()
+                
+                # If geometry matched but no valid ID/Name found for forecast, continue search
+                # (or log a warning if needed)
+                    
+        return None # No matching zone with a usable ID or NAME found
 
     def get_zone_for_bbox(self, min_lon, min_lat, max_lon, max_lat):
         """Find a marine zone within the bounding box, trying multiple points if needed."""
@@ -236,21 +291,37 @@ class NOAAMarineForecast:
                 return (zone_id, lat, lon)  # Return zone ID and the coordinate that worked
         return (None, None, None)  # No marine zone found
 
-    def get_forecast_for_zone(self, zone_id):
-        """Fetch the full forecast text for a given marine zone."""
+    def get_forecast_for_zone(self, zone_identifier):
+        """Fetch the full forecast text for a given marine zone ID or High Seas Name."""
         if self.forecast_mapping is None:
-            raise ValueError("Forecast mapping not loaded. Call initialize() first.")
+            # Attempt to load mapping if not already loaded during initialize
+            try:
+                self.forecast_mapping = self.build_forecast_mapping()
+                if self.forecast_mapping is None:
+                     raise ValueError("Forecast mapping could not be built or loaded.")
+            except Exception as e:
+                 print(f"Error building/loading forecast mapping: {e}")
+                 raise ValueError("Forecast mapping unavailable.")
+
+        url = None
+        # Try standard zone ID mapping first using .get()
+        if isinstance(zone_identifier, str):
+             url = self.forecast_mapping.get(zone_identifier)
+
+        # If not found in standard map, try High Seas Name mapping using .get()
+        if url is None and isinstance(zone_identifier, str):
+            url = self.HIGH_SEAS_NAME_TO_URL.get(zone_identifier)
             
-        url = self.forecast_mapping.get(zone_id)
         if not url:
+            print(f"No forecast URL found for identifier: {zone_identifier}")
             return None
 
         try:
-            response = requests.get(url)
+            response = requests.get(url, timeout=10) # Add timeout
             response.raise_for_status()
             return response.text.strip()
         except requests.RequestException as e:
-            print(f"Error fetching forecast: {e}")
+            print(f"Error fetching forecast for {zone_identifier} from {url}: {e}")
             return None
 
     def initialize(self):
