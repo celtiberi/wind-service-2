@@ -9,6 +9,7 @@ from shapely.geometry import Point
 import re
 import unicodedata
 from pathlib import Path
+from app.models.schemas import MarineForecastResponse # Import the response model
 
 class NOAAMarineForecast:
     def __init__(self):
@@ -112,34 +113,73 @@ class NOAAMarineForecast:
         return metadata
 
     def build_forecast_mapping(self):
-        """Build or load a mapping of zone IDs or numbers to forecast URLs."""
-        if self.forecast_urls_file.exists():
-            with open(self.forecast_urls_file, 'r') as f:
-                return json.load(f)
+        """Build or load a mapping of zone IDs to forecast URLs by finding relevant links."""
+        # if self.forecast_urls_file.exists():
+        #     try:
+        #         with open(self.forecast_urls_file, 'r') as f:
+        #             mapping = json.load(f)
+        #             print(f"Loaded existing forecast mapping with {len(mapping)} entries.")
+        #             return mapping
+        #     except json.JSONDecodeError:
+        #         print("Error reading forecast mapping file, rebuilding...")
+        #     except Exception as e:
+        #         print(f"Error loading forecast mapping file ({e}), rebuilding...")
 
         zone_to_url = {}
+        # Regex to capture zone ID from filename (e.g., ANZ050, PKZ311)
+        # Anchored (^$) and with a capture group ()
+        zone_pattern = re.compile(r'^([a-zA-Z]{3}[0-9]{3})\.txt$', re.IGNORECASE)
+        
+        print("Building forecast mapping from regional pages...")
         for region_url in self.regional_links:
-            response = requests.get(region_url)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
+            print(f"Processing: {region_url}")
+            try:
+                response = requests.get(region_url, timeout=10) # Add timeout
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, 'html.parser')
 
-            for li in soup.find_all('li'):
-                a = li.find('a', href=True)
-                if a and a['href'].endswith('.txt'):
+                found_count = 0
+                for a in soup.find_all('a', href=True):
                     href = a['href']
-                    if not href.startswith('http'):
-                        href = "https://www.weather.gov" + href
-                    
-                    text = unicodedata.normalize('NFKD', li.get_text()).encode('ASCII', 'ignore').decode()
-                    zone_match = re.search(r'\(([^()]+)\)', text)
-                    if zone_match:
-                        zone_info = zone_match.group(1)
-                        zone_parts = zone_info.split('/')
-                        zone_id = zone_parts[0]
-                        zone_to_url[zone_id] = href
+                    # Check if the link points to a marine forecast txt file
+                    if '/data/forecasts/marine/' in href and href.endswith('.txt'):
+                        # Extract filename
+                        filename = href.split('/')[-1] # Get last part of path
+                        
+                        match = zone_pattern.search(filename) # Search the filename only
+                        if match:
+                            zone_id = match.group(1).upper() # Extract captured group (the ID)
+                            
+                            # Construct full URL if relative
+                            full_url = href
+                            if not href.startswith('http'):
+                                # Find the base URL (handle potential tgftp subdomain)
+                                base_url = "https://tgftp.nws.noaa.gov" if "tgftp" in full_url else "https://www.weather.gov"
+                                # Ensure we don't add double slashes if href starts with one
+                                if href.startswith('/'):
+                                    full_url = base_url + href
+                                else:
+                                    full_url = base_url + '/' + href # Should not happen often with this structure
 
-        with open(self.forecast_urls_file, 'w') as f:
-            json.dump(zone_to_url, f, indent=4)
+                            if zone_id not in zone_to_url: # Avoid duplicates/overwrites
+                                zone_to_url[zone_id] = full_url
+                                found_count += 1
+                                # print(f"  Found: {zone_id} -> {full_url}") # Optional: Debug print
+                print(f"  Found {found_count} forecast links on this page.")
+
+            except requests.RequestException as e:
+                print(f"  Error fetching or parsing {region_url}: {e}")
+            except Exception as e:
+                 print(f"  Unexpected error processing {region_url}: {e}")
+
+        print(f"Finished building forecast mapping. Total zones found: {len(zone_to_url)}")
+        try:
+            with open(self.forecast_urls_file, 'w') as f:
+                json.dump(zone_to_url, f, indent=4)
+            print(f"Saved forecast mapping to {self.forecast_urls_file}")
+        except IOError as e:
+            print(f"Error saving forecast mapping file: {e}")
+           
         return zone_to_url
 
     def load_shapefiles(self, metadata):
@@ -228,7 +268,7 @@ class NOAAMarineForecast:
         # Load shapefiles
         self.zones = self.load_shapefiles(self.metadata)
 
-    def get_forecast(self, lat=None, lon=None, bbox=None):
+    def get_forecast(self, lat=None, lon=None, bbox=None) -> MarineForecastResponse:
         """
         Get the marine forecast for a specific location or bounding box.
         
@@ -238,17 +278,19 @@ class NOAAMarineForecast:
             bbox (tuple, optional): (min_lon, min_lat, max_lon, max_lat) for bounding box lookup
             
         Returns:
-            dict: {
-                'forecast': str,  # The forecast text
-                'zone_id': str,   # The zone ID
-                'lat': float,     # The latitude used
-                'lon': float,     # The longitude used
-                'error': str      # Error message if any
-            }
+            MarineForecastResponse: Containing the forecast text or an error message
+                                   in the 'forecast' field.
         """
         if self.zones is None or self.forecast_mapping is None:
-            self.initialize()
+            try:
+                self.initialize()
+            except Exception as e:
+                # Handle initialization errors
+                error_msg = f"Initialization error: {e}"
+                print(error_msg)
+                return MarineForecastResponse(forecast=error_msg)
 
+        used_lat, used_lon = None, None # Initialize
         if lat is not None and lon is not None:
             zone_id = self.get_zone_for_coordinate(lat, lon)
             used_lat, used_lon = lat, lon
@@ -256,37 +298,29 @@ class NOAAMarineForecast:
             min_lon, min_lat, max_lon, max_lat = bbox
             zone_id, used_lat, used_lon = self.get_zone_for_bbox(min_lon, min_lat, max_lon, max_lat)
         else:
-            return {
-                'error': 'Either lat/lon or bbox must be provided',
-                'forecast': None,
-                'zone_id': None,
-                'lat': None,
-                'lon': None
-            }
+            return MarineForecastResponse(
+                forecast='Either lat/lon or bbox must be provided'
+            )
 
         if not zone_id:
-            return {
-                'error': 'No marine zone found for the given location',
-                'forecast': None,
-                'zone_id': None,
-                'lat': used_lat,
-                'lon': used_lon
-            }
+            return MarineForecastResponse(
+                forecast='No marine zone found for the given location',
+                lat=used_lat,
+                lon=used_lon
+            )
 
-        forecast = self.get_forecast_for_zone(zone_id)
-        if not forecast:
-            return {
-                'error': f'No forecast found for zone {zone_id}',
-                'forecast': None,
-                'zone_id': zone_id,
-                'lat': used_lat,
-                'lon': used_lon
-            }
+        forecast_text = self.get_forecast_for_zone(zone_id)
+        if not forecast_text:
+            return MarineForecastResponse(
+                forecast=f'No forecast found for zone {zone_id}',
+                zone_id=zone_id,
+                lat=used_lat,
+                lon=used_lon
+            )
 
-        return {
-            'error': None,
-            'forecast': forecast,
-            'zone_id': zone_id,
-            'lat': used_lat,
-            'lon': used_lon
-        }
+        return MarineForecastResponse(
+            forecast=forecast_text,
+            zone_id=zone_id,
+            lat=used_lat,
+            lon=used_lon
+        )

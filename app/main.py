@@ -2,7 +2,7 @@ from functools import lru_cache
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.models.schemas import (
-    BoundingBox, WindDataResponse, WaveDataResponse, MarineHazardsResponse, LocationRequest    
+    BoundingBox, WindDataResponse, WaveDataResponse, MarineHazardsResponse, LocationRequest, MarineForecastResponse    
 )
 from app.services.weather_service import WeatherService
 from app.services.process_weather_data import logger
@@ -402,30 +402,10 @@ async def health_check():
         "weather_service_ready": weather_service.is_ready(),
     }
 
-class MarineForecastRequest(BaseModel):
-    name: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    min_lat: Optional[float] = None
-    max_lat: Optional[float] = None
-    min_lon: Optional[float] = None
-    max_lon: Optional[float] = None
 
-    class Config:
-        schema_extra = {
-            "example": {
-                "name": "Caribbean Sea",
-                "lat": 20.090,
-                "lon": -83.502,
-                "min_lat": 9.252,
-                "max_lat": 22.328,
-                "min_lon": -87.537,
-                "max_lon": -66.356
-            }
-        }
 
-@app.post("/marine-forecast")
-async def get_marine_forecast(request: MarineForecastRequest):
+@app.post("/marine-forecast", response_model=MarineForecastResponse)
+async def get_marine_forecast(request: LocationRequest):
     """
     Get marine forecast for a specific location or area.
     
@@ -435,30 +415,37 @@ async def get_marine_forecast(request: MarineForecastRequest):
     - Bounding box coordinates (min_lat, max_lat, min_lon, max_lon)
     
     Returns:
-        dict containing:
-        - forecast: The marine forecast text
-        - zone_id: The zone ID where the forecast is from
-        - lat: The latitude used to find the forecast
-        - lon: The longitude used to find the forecast
-        - error: Error message if any
+        MarineForecastResponse containing:
+        - forecast: The marine forecast text (or an error message)
+        - zone_id: The zone ID where the forecast is from (if found)
+        - lat: The latitude used to find the forecast (if applicable)
+        - lon: The longitude used to find the forecast (if applicable)
     """
-    if request.name:
-        bbox = get_bbox_by_name(request.name)
-        result = marine_forecast_service.get_forecast(bbox=(
-            bbox["min_lon"], bbox["min_lat"], bbox["max_lon"], bbox["max_lat"]
-        ))
-    elif request.lat is not None and request.lon is not None:
-        result = marine_forecast_service.get_forecast(lat=request.lat, lon=request.lon)
-    elif all(v is not None for v in [request.min_lat, request.max_lat, request.min_lon, request.max_lon]):
-        result = marine_forecast_service.get_forecast(bbox=(
-            request.min_lon, request.min_lat, request.max_lon, request.max_lat
-        ))
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Must provide either name, lat/lon coordinates, or bounding box coordinates"
-        )
-
-    if result['error']:
-        raise HTTPException(status_code=404, detail=result['error'])
-    return result
+    try:
+        if request.name:
+            # Use the utility function to get BoundingBox object first
+            bbox_obj = get_bounding_box(request)
+            result = marine_forecast_service.get_forecast(bbox=(
+                bbox_obj.min_lon, bbox_obj.min_lat, bbox_obj.max_lon, bbox_obj.max_lat
+            ))
+        elif request.lat is not None and request.lon is not None:
+            result = marine_forecast_service.get_forecast(lat=request.lat, lon=request.lon)
+        elif all(v is not None for v in [request.min_lat, request.max_lat, request.min_lon, request.max_lon]):
+            result = marine_forecast_service.get_forecast(bbox=(
+                request.min_lon, request.min_lat, request.max_lon, request.max_lat
+            ))
+        else:
+            # Return the error directly in the response model format
+            return MarineForecastResponse(
+                forecast="Must provide either name, lat/lon coordinates, or bounding box coordinates"
+            )
+        
+        # The service now handles errors internally and returns them in the forecast field
+        return result
+    except ValueError as e:
+        # Handle errors from get_bounding_box (e.g., location not found)
+        return MarineForecastResponse(forecast=str(e))
+    except Exception as e:
+        # Catch unexpected errors
+        print(f"Unexpected error in /marine-forecast: {e}") # Log the error server-side
+        return MarineForecastResponse(forecast=f"An unexpected error occurred: {e}")

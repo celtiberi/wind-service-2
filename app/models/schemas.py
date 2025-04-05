@@ -170,4 +170,11 @@ class MarineHazardsResponse(BaseModel):
     valid_time: datetime
     grib_info: GribFile
     storm_indicators: Dict
-    description: str  
+    description: str
+
+class MarineForecastResponse(BaseModel):
+    """Response model for NOAA marine forecast text."""
+    forecast: str
+    zone_id: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None  

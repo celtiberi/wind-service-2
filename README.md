@@ -273,6 +273,13 @@ curl -X POST "http://localhost:8000/marine-forecast" \
      -d '{"lat": 20.090, "lon": -83.502}'
 ```
 
+```bash
+curl -X POST "http://localhost:8000/marine-forecast" \
+     -H "Content-Type: application/json" \
+     -d '{"lat": 42.391, "lon": -30.366}'
+```
+
+
 Get marine forecast by bounding box:
 ```bash
 curl -X POST "http://localhost:8000/marine-forecast" \
