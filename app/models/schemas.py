@@ -1,36 +1,106 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 
-class LocationRequest(BaseModel):
-    name: str = Field(..., description="Name of the location (e.g., 'Caribbean Sea', 'Mediterranean Sea')")
-
 class BoundingBox(BaseModel):
-    name: Optional[str] = Field(None, description="Name of the location (e.g., 'Caribbean Sea', 'Mediterranean Sea')")
-    min_lat: Optional[float] = Field(None, ge=-90, le=90, description="Minimum latitude")
-    max_lat: Optional[float] = Field(None, ge=-90, le=90, description="Maximum latitude")
-    min_lon: Optional[float] = Field(None, ge=-180, le=180, description="Minimum longitude")
-    max_lon: Optional[float] = Field(None, ge=-180, le=180, description="Maximum longitude")
-    unit: Optional[str] = Field("feet", description="Unit for wave height: 'meters' or 'feet'")
+    """Model for geographical bounding box coordinates"""
+    min_lat: float
+    max_lat: float
+    min_lon: float
+    max_lon: float
 
-    @validator('min_lat', 'max_lat', 'min_lon', 'max_lon')
-    def validate_coordinates(cls, v, values):
-        if 'name' not in values or not values['name']:
-            if v is None:
-                raise ValueError("Coordinates are required when name is not provided")
+    class Config:
+        schema_extra = {
+            "example": {
+                "min_lat": 9.252,
+                "max_lat": 22.328,
+                "min_lon": -87.537,
+                "max_lon": -66.356
+            }
+        }
+
+    @field_validator('min_lat', 'max_lat')
+    def validate_latitude(cls, v):
+        if not -90 <= v <= 90:
+            raise ValueError("Latitude must be between -90 and 90 degrees")
         return v
 
-    @validator('name')
-    def validate_name(cls, v, values):
-        if v is None and all(values.get(field) is None for field in ['min_lat', 'max_lat', 'min_lon', 'max_lon']):
-            raise ValueError("Either name or coordinates must be provided")
+    @field_validator('min_lon', 'max_lon')
+    def validate_longitude(cls, v):
+        if not -180 <= v <= 180:
+            raise ValueError("Longitude must be between -180 and 180 degrees")
         return v
 
-    @validator('unit')
+    @field_validator('max_lat')
+    def validate_lat_range(cls, v, info):
+        if 'min_lat' in info.data and v <= info.data['min_lat']:
+            raise ValueError("max_lat must be greater than min_lat")
+        return v
+
+    @field_validator('max_lon')
+    def validate_lon_range(cls, v, info):
+        if 'min_lon' in info.data and v <= info.data['min_lon']:
+            raise ValueError("max_lon must be greater than min_lon")
+        return v
+    
+class LocationRequest(BaseModel):
+    """Model for location requests that can be specified by name or coordinates"""
+    name: Optional[str] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    min_lat: Optional[float] = None
+    max_lat: Optional[float] = None
+    min_lon: Optional[float] = None
+    max_lon: Optional[float] = None
+    unit: Optional[str] = "feet"  # For wave data, can be "meters" or "feet"
+
+    @field_validator('unit')
     def validate_unit(cls, v):
         if v not in ["meters", "feet"]:
             raise ValueError("Unit must be 'meters' or 'feet'")
         return v
+
+    @field_validator('lat', 'lon')
+    def validate_point_coordinates(cls, v, info):
+        if v is not None:
+            if info.field_name == 'lat' and not -90 <= v <= 90:
+                raise ValueError("Latitude must be between -90 and 90 degrees")
+            if info.field_name == 'lon' and not -180 <= v <= 180:
+                raise ValueError("Longitude must be between -180 and 180 degrees")
+        return v
+
+    @field_validator('min_lat', 'max_lat', 'min_lon', 'max_lon')
+    def validate_box_coordinates(cls, v, info):
+        if v is not None:
+            if info.field_name in ['min_lat', 'max_lat'] and not -90 <= v <= 90:
+                raise ValueError("Latitude must be between -90 and 90 degrees")
+            if info.field_name in ['min_lon', 'max_lon'] and not -180 <= v <= 180:
+                raise ValueError("Longitude must be between -180 and 180 degrees")
+        return v
+
+    def to_bounding_box(self) -> BoundingBox:
+        """Convert this request to a BoundingBox object"""
+        if self.name:
+            # This will be handled by the get_bounding_box function
+            raise ValueError("Name-based requests should be handled by get_bounding_box function")
+        elif self.lat is not None and self.lon is not None:
+            # Create a small box around the point
+            return BoundingBox(
+                min_lat=self.lat - 1,
+                max_lat=self.lat + 1,
+                min_lon=self.lon - 1,
+                max_lon=self.lon + 1
+            )
+        elif all(v is not None for v in [self.min_lat, self.max_lat, self.min_lon, self.max_lon]):
+            return BoundingBox(
+                min_lat=self.min_lat,
+                max_lat=self.max_lat,
+                min_lon=self.min_lon,
+                max_lon=self.max_lon
+            )
+        else:
+            raise ValueError("Must provide either name, lat/lon coordinates, or bounding box coordinates")
+
 
 class PrecipitationDataPoint(BaseModel):
     latitude: float

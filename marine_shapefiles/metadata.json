@@ -1,0 +1,14 @@
+{
+    "Coastal Marine Zones Including the Great Lakes": {
+        "filename": "marine_shapefiles/mz18mr25.zip",
+        "valid_date": "03/18/2025"
+    },
+    "Offshore Marine Zones": {
+        "filename": "marine_shapefiles/oz18mr25.zip",
+        "valid_date": "03/18/2025"
+    },
+    "High Seas Marine Zones": {
+        "filename": "marine_shapefiles/hz20fe25.zip",
+        "valid_date": "02/20/2025"
+    }
+}

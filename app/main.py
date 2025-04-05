@@ -1,7 +1,9 @@
 from functools import lru_cache
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from app.models.schemas import BoundingBox, WindDataResponse, WaveDataResponse, WaveDataPoint, GribFile, LocationRequest, MarineHazardsResponse, PrecipitationDataPoint
+from app.models.schemas import (
+    BoundingBox, WindDataResponse, WaveDataResponse, MarineHazardsResponse, LocationRequest    
+)
 from app.services.weather_service import WeatherService
 from app.services.process_weather_data import logger
 from app.services.noaa_marine_forecast import NOAAMarineForecast
@@ -13,76 +15,8 @@ from pathlib import Path
 import time
 import requests
 from pydantic import BaseModel
-
-
-# Get the project root directory (where main.py is)
-PROJECT_ROOT = Path(__file__).parent.parent
-
-# Load GeoDataFrames once at startup
-try:
-    MARINE_GDF = gpd.read_file(PROJECT_ROOT / "app" / "natural_earth" / "ne_10m_geography_marine_polys.shp")
-    COUNTRIES_GDF = gpd.read_file(PROJECT_ROOT / "app" / "natural_earth" / "ne_10m_admin_0_countries.shp")
-    LAKES_GDF = gpd.read_file(PROJECT_ROOT / "app" / "natural_earth" / "ne_10m_lakes.shp")
-    print("Successfully loaded geography data files")
-except Exception as e:
-    print(f"Error loading geography data files: {e}")
-    MARINE_GDF = None
-    COUNTRIES_GDF = None
-    LAKES_GDF = None
-
-@lru_cache(maxsize=128)
-def get_bbox_by_name(name: str) -> dict:
-    """Get bounding box by name from shapefiles or Nominatim API with buffer for small areas."""
-    name_lower = name.lower()
-    buffer = 3.0  # 1-degree buffer for small areas (adjust as needed)
-
-    shapefiles = [
-        (MARINE_GDF, "name"),
-        (COUNTRIES_GDF, "NAME"),
-        (LAKES_GDF, "name"),
-    ]
-
-    for gdf, name_column in shapefiles:
-        try:
-            if gdf is None:
-                continue
-            location = gdf[gdf[name_column].str.lower() == name_lower]
-            if not location.empty:
-                bbox = location.total_bounds
-                lat_range = bbox[3] - bbox[1]
-                lon_range = bbox[2] - bbox[0]
-                if lat_range < 5 or lon_range < 5:
-                    return {
-                        "min_lat": bbox[1] - buffer,
-                        "max_lat": bbox[3] + buffer,
-                        "min_lon": bbox[0] - buffer,
-                        "max_lon": bbox[2] + buffer
-                    }
-                return {"min_lat": bbox[1], "max_lat": bbox[3], "min_lon": bbox[0], "max_lon": bbox[2]}
-        except Exception as e:
-            print(f"Error checking {name_column} in shapefile: {e}")
-            continue
-
-    url = "https://nominatim.openstreetmap.org/search"
-    params = {"q": name, "format": "json", "limit": 1}
-    headers = {"User-Agent": "WeatherDataAPI/1.0 (your-email@example.com)"}
-    response = requests.get(url, params=params, headers=headers)
-    data = response.json()
-    if data and "boundingbox" in data[0]:
-        bbox = [float(x) for x in data[0]["boundingbox"]]
-        lat_range = bbox[1] - bbox[0]
-        lon_range = bbox[3] - bbox[2]
-        if lat_range < 5 or lon_range < 5:
-            return {
-                "min_lat": bbox[0] - buffer,
-                "max_lat": bbox[1] + buffer,
-                "min_lon": bbox[2] - buffer,
-                "max_lon": bbox[3] + buffer
-            }
-        return {"min_lat": bbox[0], "max_lat": bbox[1], "min_lon": bbox[2], "max_lon": bbox[3]}
-
-    raise ValueError(f"Location '{name}' not found")
-
+from app.utils.bbox import get_bounding_box
+import logging
 
 
 app = FastAPI(
@@ -156,72 +90,120 @@ async def startup_event():
 async def shutdown_event():
     pass
 
-@app.post("/wind-data", response_model=WindDataResponse)
-async def get_wind_data(request: BoundingBox):
-    try:
-        if not weather_service.is_ready():
-            raise HTTPException(status_code=503, detail="GRIB files not yet available. Please try again in a few minutes.")
-            
-        if request.name:
-            try:
-                bbox = get_bbox_by_name(request.name)
-                min_lat, max_lat, min_lon, max_lon = (
-                    bbox["min_lat"], bbox["max_lat"], bbox["min_lon"], bbox["max_lon"]
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
-        else:
-            min_lat, max_lat, min_lon, max_lon = (
-                request.min_lat, request.max_lat, request.min_lon, request.max_lon
-            )
-            
-        data_points, image_base64, valid_time, grib_file, description = weather_service.process_wind_data(
-            min_lat, max_lat, min_lon, max_lon
-        )
-        
-        return WindDataResponse(
-            valid_time=valid_time,
-            data_points=data_points,
-            image_base64=image_base64,
-            grib_file=grib_file,
-            description=description
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+@app.get("/")
+async def root():
+    """Root endpoint that returns API information"""
+    return {
+        "name": "Weather Data API",
+        "version": "1.0.0",
+        "description": "API for retrieving weather data including wind, waves, and marine hazards",
+        "endpoints": [
+            {
+                "path": "/wind-data",
+                "method": "POST",
+                "description": "Get wind data and visualization for a specified region"
+            },
+            {
+                "path": "/wave-data",
+                "method": "POST",
+                "description": "Get wave data and visualization for a specified region"
+            },
+            {
+                "path": "/marine-hazards",
+                "method": "POST",
+                "description": "Get marine hazards data and visualization for a specified region"
+            }
+        ]
+    }
 
-@app.post("/marine-hazards", response_model=MarineHazardsResponse)
-async def get_marine_hazards(request: BoundingBox):
+@app.post("/wind-data", 
+    response_model=WindDataResponse,
+    summary="Get wind data and visualization",
+    description="""
+    Retrieve wind data and generate a visualization for a specified geographical region.
+    You can specify the region either by coordinates or by name (e.g., 'Caribbean Sea').
+    
+    The endpoint returns:
+    * Wind data points for each grid location
+    * A base64-encoded PNG image of the wind map
+    * The valid time of the data
+    * Information about the GRIB file used
+    * A text description of current wind conditions
+    
+    The wind map includes:
+    * Color-coded wind speed visualization
+    * Wind barbs showing direction and speed
+    * Coastlines for geographical context
+    * A colorbar indicating wind speed values
+    """,
+    responses={
+        200: {
+            "description": "Successfully retrieved wind data and generated visualization",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "valid_time": "2024-03-22T12:00:00",
+                        "data_points": [
+                            {
+                                "latitude": 37.5,
+                                "longitude": -72.5,
+                                "wind_speed_knots": 15.2
+                            }
+                        ],
+                        "image_base64": "base64_encoded_png_image",
+                        "grib_file": {
+                            "path": "gfs.t12z.pgrb2.0p25.f000",
+                            "download_time": "2024-03-22T12:30:00",
+                            "metadata": {
+                                "cycle": "t12z",
+                                "resolution": "0p25",
+                                "forecast_hour": "f000"
+                            }
+                        },
+                        "description": "Wind conditions description"
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Location not found",
+            "content": {"application/json": {"example": {"detail": "Location 'Unknown Sea' not found"}}}
+        },
+        503: {
+            "description": "Service temporarily unavailable - GRIB files not yet available",
+            "content": {"application/json": {"example": {"detail": "GRIB files not yet available"}}}
+        },
+        500: {
+            "description": "Error processing the request",
+            "content": {"application/json": {"example": {"detail": "Error opening GRIB file"}}}
+        }
+    }
+)
+async def get_wind_data(request: LocationRequest):
+    """
+    Get wind data and visualization for a specified region.
+    
+    Args:
+        request: Either coordinates (min_lat, max_lat, min_lon, max_lon) or a location name
+        
+    Returns:
+        WindDataResponse containing:
+        - valid_time: The valid time of the data
+        - data_points: List of wind data points with latitude, longitude, and speed
+        - image_base64: Base64 encoded PNG image of the wind map
+        - grib_file: Information about the GRIB file used
+        - description: Text description of current wind conditions
+        
+    Raises:
+        HTTPException: If the location is not found or there's an error processing the request
+    """
     try:
         if not weather_service.is_ready():
-            raise HTTPException(status_code=503, detail="GRIB files not yet available. Please try again in a few minutes.")
+            raise HTTPException(status_code=503, detail="Wind GRIB files not yet available. Please try again in a few minutes.")
             
-        if request.name:
-            try:
-                bbox = get_bbox_by_name(request.name)
-                min_lat, max_lat, min_lon, max_lon = (
-                    bbox["min_lat"], bbox["max_lat"], bbox["min_lon"], bbox["max_lon"]
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
-        else:
-            min_lat, max_lat, min_lon, max_lon = (
-                request.min_lat, request.max_lat, request.min_lon, request.max_lon
-            )
-            
-        data_points, image_base64, valid_time, grib_file, storm_indicators, description = weather_service.process_marine_hazards(
-            min_lat, max_lat, min_lon, max_lon
-        )
+        bbox = get_bounding_box(request)
         
-        return MarineHazardsResponse(
-            valid_time=valid_time,
-            data_points=data_points,
-            image_base64=image_base64,
-            grib_file=grib_file,
-            storm_indicators=storm_indicators,
-            description=description
-        )
+        return weather_service.process_wind_data(bbox)
     except HTTPException:
         raise
     except Exception as e:
@@ -295,13 +277,16 @@ async def get_marine_hazards(request: BoundingBox):
         }
     }
 )
-async def get_wave_data(request: BoundingBox):
+async def get_wave_data(request: LocationRequest):
     """
     Get wave data and visualization for a specified region.
     
     Args:
-        request: Either coordinates (min_lat, max_lat, min_lon, max_lon) or a location name,
-                plus optional unit parameter ('meters' or 'feet')
+        request: LocationRequest object containing either:
+            - name: Name of a region (e.g., 'Caribbean Sea')
+            - lat/lon: Point coordinates
+            - min_lat/max_lat/min_lon/max_lon: Explicit bounding box coordinates
+            - unit: Optional unit for wave height ('meters' or 'feet', default: 'meters')
         
     Returns:
         WaveDataResponse containing:
@@ -317,31 +302,94 @@ async def get_wave_data(request: BoundingBox):
     try:
         if not weather_service.is_ready():
             raise HTTPException(status_code=503, detail="Wave GRIB files not yet available. Please try again in a few minutes.")
-            
-        if request.name:
-            try:
-                bbox = get_bbox_by_name(request.name)
-                min_lat, max_lat, min_lon, max_lon = (
-                    bbox["min_lat"], bbox["max_lat"], bbox["min_lon"], bbox["max_lon"]
-                )
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
-        else:
-            min_lat, max_lat, min_lon, max_lon = (
-                request.min_lat, request.max_lat, request.min_lon, request.max_lon
-            )
-            
-        data_points, image_base64, valid_time, grib_file, description, _ = weather_service.process_wave_data(
-            min_lat, max_lat, min_lon, max_lon, unit=request.unit
-        )
         
-        return WaveDataResponse(
-            valid_time=valid_time,
-            data_points=data_points,
-            image_base64=image_base64,
-            grib_file=grib_file,
-            description=description
-        )
+        bbox = get_bounding_box(request)
+            
+        return weather_service.process_wave_data(bbox, unit=request.unit)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/marine-hazards", 
+    response_model=MarineHazardsResponse,
+    summary="Get marine hazards data and visualization",
+    description="""
+    Retrieve marine hazards data and generate a visualization for a specified geographical region.
+    You can specify the region either by coordinates or by name (e.g., 'Caribbean Sea').
+    
+    The endpoint returns:
+    * Marine hazards data points for each grid location
+    * A base64-encoded PNG image of the hazards map
+    * The valid time of the data
+    * Information about the GRIB file used
+    * A text description of current hazards
+    
+    The hazards map includes:
+    * Color-coded visualization of different hazards
+    * Storm indicators and risk areas
+    * Coastlines for geographical context
+    * A legend indicating hazard types
+    """,
+    responses={
+        200: {
+            "description": "Successfully retrieved marine hazards data and generated visualization",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "valid_time": "2024-03-22T12:00:00",
+                        "data_points": [...],
+                        "image_base64": "base64_encoded_png_image",
+                        "grib_file": {...},
+                        "storm_indicators": [...],
+                        "description": "Marine hazards description"
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "Location not found",
+            "content": {"application/json": {"example": {"detail": "Location 'Unknown Sea' not found"}}}
+        },
+        503: {
+            "description": "Service temporarily unavailable - GRIB files not yet available",
+            "content": {"application/json": {"example": {"detail": "GRIB files not yet available"}}}
+        },
+        500: {
+            "description": "Error processing the request",
+            "content": {"application/json": {"example": {"detail": "Error opening GRIB file"}}}
+        }
+    }
+)
+async def get_marine_hazards(request: LocationRequest):
+    """
+    Get marine hazards data and visualization for a specified region.
+    
+    Args:
+        request: LocationRequest object containing either:
+            - name: Name of a region (e.g., 'Caribbean Sea')
+            - lat/lon: Point coordinates
+            - min_lat/max_lat/min_lon/max_lon: Explicit bounding box coordinates
+        
+    Returns:
+        MarineHazardsResponse containing:
+        - valid_time: The valid time of the data
+        - data_points: List of marine hazards data points
+        - image_base64: Base64 encoded PNG image of the hazards map
+        - grib_file: Information about the GRIB file used
+        - storm_indicators: List of storm indicators
+        - description: Text description of current hazards
+        
+    Raises:
+        HTTPException: If the location is not found or there's an error processing the request
+    """
+    try:
+        if not weather_service.is_ready():
+            raise HTTPException(status_code=503, detail="Marine hazards GRIB files not yet available. Please try again in a few minutes.")
+            
+        bbox = get_bounding_box(request)
+        
+        return weather_service.process_marine_hazards(bbox)
     except HTTPException:
         raise
     except Exception as e:

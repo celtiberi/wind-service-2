@@ -10,11 +10,11 @@ from io import BytesIO
 from typing import Tuple, List, Dict, Optional
 from datetime import datetime
 from .process_weather_data import ProcessWeatherData, logger
-from app.models.schemas import GribFile
+from app.models.schemas import GribFile, WaveDataResponse, WaveDataPoint, BoundingBox
 
 class ProcessWaveData(ProcessWeatherData):
-    def process_data(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float, unit: str = "feet") -> Tuple[List[dict], str, datetime, GribFile, Optional[Dict], str]:
-        logger.info(f"Processing wave data for bounding box: ({min_lat}, {max_lat}, {min_lon}, {max_lon}) with unit: {unit}")
+    def process_data(self, bbox: BoundingBox, unit: str = "meters") -> WaveDataResponse:
+        logger.info(f"Processing wave data for bounding box: {bbox} with unit: {unit}")
         
         if not self._wave_grib or not self._wave_grib_file_data:
             raise ValueError("Wave GRIB file not available")
@@ -45,9 +45,9 @@ class ProcessWaveData(ProcessWeatherData):
 
         # Slice the data to the bounding box
         try:
-            height_data, lats, lons = self._slice_data_to_bounding_box(height_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
-            period_data, _, _ = self._slice_data_to_bounding_box(period_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
-            dir_data, _, _ = self._slice_data_to_bounding_box(dir_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
+            height_data, lats, lons = self._slice_data_to_bounding_box(height_data_full, lats_full, lons_full, bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon)
+            period_data, _, _ = self._slice_data_to_bounding_box(period_data_full, lats_full, lons_full, bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon)
+            dir_data, _, _ = self._slice_data_to_bounding_box(dir_data_full, lats_full, lons_full, bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon)
         except Exception as e:
             logger.error(f"Error slicing wave data: {e}", exc_info=True)
             raise
@@ -69,13 +69,13 @@ class ProcessWaveData(ProcessWeatherData):
                     
                     # Only add the point if none of the values are NaN
                     if not (np.isnan(height) or np.isnan(period) or np.isnan(direction)):
-                        data_points.append({
-                            'latitude': float(lats[i, j]),
-                            'longitude': float(lons[i, j]),
-                            'wave_height': height,  # Already in the requested unit (feet or meters)
-                            'wave_period_s': period,
-                            'wave_direction_deg': direction
-                        })
+                        data_points.append(WaveDataPoint(
+                            latitude=float(lats[i, j]),
+                            longitude=float(lons[i, j]),
+                            wave_height=height,  # Already in the requested unit (feet or meters)
+                            wave_period_s=period,
+                            wave_direction_deg=direction
+                        ))
             logger.info(f"Created {len(data_points)} valid wave data points")
         except Exception as e:
             logger.error(f"Error creating wave data points: {e}", exc_info=True)
@@ -83,7 +83,7 @@ class ProcessWaveData(ProcessWeatherData):
 
         # Generate and encode the plot
         try:
-            image_base64 = self._generate_plot(lats, lons, height_data, min_lat, max_lat, min_lon, max_lon, 
+            image_base64 = self._generate_plot(lats, lons, height_data, bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon, 
                                               height_grb.validDate, self._wave_grib_file_data, 
                                               dir_data=dir_data, unit=unit, period_data=period_data)
             logger.info("Wave plot generated successfully")
@@ -136,13 +136,20 @@ class ProcessWaveData(ProcessWeatherData):
             logger.error(f"Error generating description: {e}", exc_info=True)
             description = "Unable to generate wave conditions description"
 
-        return data_points, image_base64, height_grb.validDate, self._wave_grib_file_data, description, None
+        return WaveDataResponse(
+            valid_time=height_grb.validDate,
+            data_points=data_points,
+            image_base64=image_base64,
+            grib_file=self._wave_grib_file_data,
+            description=description
+        )
     
     def _generate_plot(self, lats: np.ndarray, lons: np.ndarray, data_field: np.ndarray, 
                       min_lat: float, max_lat: float, min_lon: float, max_lon: float, 
                       valid_time: datetime, grib_file: GribFile, **kwargs) -> str:
         logger.info("Generating wave plot")
         dir_data = kwargs.get('dir_data')
+        period_data = kwargs.get('period_data') # Get period data
         unit = kwargs.get('unit', 'feet')  # Default to feet if not specified
 
         # Create figure and axis with projection
@@ -189,67 +196,113 @@ class ProcessWaveData(ProcessWeatherData):
                 f'Valid: {valid_time.strftime("%Y-%m-%d %H:%M UTC")}\n'
                 f'Downloaded: {grib_file.download_time}')
 
-        # Plot the wave height field
-        norm = plt.cm.colors.Normalize(vmin=vmin, vmax=vmax)
-        cs = ax.pcolormesh(lons, lats, data_field, 
-                          transform=ccrs.PlateCarree(),
-                          cmap=cmap, norm=norm)
+        # Calculate cell edges for pcolormesh
+        try:
+            dlat = np.mean(np.diff(lats[:, 0]))
+            dlon = np.mean(np.diff(lons[0, :]))
+            lat_edges = np.concatenate([
+                [lats[0, 0] - dlat/2], (lats[:-1, 0] + lats[1:, 0])/2, [lats[-1, 0] + dlat/2]
+            ])
+            lon_edges = np.concatenate([
+                [lons[0, 0] - dlon/2], (lons[0, :-1] + lons[0, 1:])/2, [lons[0, -1] + dlon/2]
+            ])
+            lon_mesh, lat_mesh = np.meshgrid(lon_edges, lat_edges)
+
+            # Plot the wave height field using mesh edges
+            norm = plt.cm.colors.Normalize(vmin=vmin, vmax=vmax)
+            cs = ax.pcolormesh(lon_mesh, lat_mesh, data_field, 
+                              transform=ccrs.PlateCarree(),
+                              cmap=cmap, norm=norm)
+            logger.debug("Plotted wave height field with pcolormesh using explicit edges")
+            
+            # Determine extent from the calculated mesh edges
+            plot_min_lon = lon_edges.min()
+            plot_max_lon = lon_edges.max()
+            plot_min_lat = lat_edges.min()
+            plot_max_lat = lat_edges.max()
+
+        except Exception as e:
+            logger.error(f"Error plotting wave height field: {e}", exc_info=True)
+            raise Exception(f"Error plotting wave height field: {e}")
 
         # Add colorbar
         cbar = plt.colorbar(cs, ax=ax, orientation='horizontal', pad=0.05)
         cbar.set_label(label, fontsize=12)
 
-        # Calculate grid for wave direction arrows
-        target_arrows = 20  # Number of arrows in each dimension
-        rows, cols = lats.shape
-        stride_lat = max(1, rows // target_arrows)
-        stride_lon = max(1, cols // target_arrows)
-        arrow_lats, arrow_lons, arrow_dx, arrow_dy = [], [], [], []
-        
-        for i in range(0, rows-stride_lat, stride_lat):
-            for j in range(0, cols-stride_lon, stride_lon):
-                lat_block = lats[i:i+stride_lat, j:j+stride_lon]
-                lon_block = lons[i:i+stride_lat, j:j+stride_lon]
-                dir_block = dir_data[i:i+stride_lat, j:j+stride_lon]
-                
-                # Average direction in the block
-                mean_dir = np.mean(dir_block)
-                dir_rad = np.deg2rad(mean_dir + 180)  # Flip direction by 180°
-                
-                # Get wave period for this location
-                period = kwargs.get('period_data')[i:i+stride_lat, j:j+stride_lon]
-                mean_period = np.mean(period)
-                
-                # Scale arrow length inversely with period
-                # Shorter period = shorter arrow
-                scale = mean_period / 10.0  # Normalize to max period of ~20s
-                
-                # Components for arrow direction (waves traveling "toward")
-                dx = np.sin(dir_rad) * scale
-                dy = np.cos(dir_rad) * scale
-                
-                arrow_lats.append(np.mean(lat_block))
-                arrow_lons.append(np.mean(lon_block))
-                arrow_dx.append(dx)
-                arrow_dy.append(dy)
+        # Calculate grid for wave direction arrows (fixed number)
+        try:
+            target_arrows_per_dim = 15 # Match wind barb density
+            rows, cols = lats.shape
+            stride_lat = max(1, rows // target_arrows_per_dim)
+            stride_lon = max(1, cols // target_arrows_per_dim)
+            
+            # Add offset for centering
+            offset_lat = stride_lat // 2
+            offset_lon = stride_lon // 2
+            
+            # Select subset using strides
+            arrow_lats_subset = lats[offset_lat::stride_lat, offset_lon::stride_lon]
+            arrow_lons_subset = lons[offset_lat::stride_lat, offset_lon::stride_lon]
+            arrow_dir_subset = dir_data[offset_lat::stride_lat, offset_lon::stride_lon]
+            arrow_period_subset = period_data[offset_lat::stride_lat, offset_lon::stride_lon]
 
-        # Add wave direction arrows
-        ax.quiver(arrow_lons, arrow_lats, arrow_dx, arrow_dy,
-                 transform=ccrs.PlateCarree(),
-                 scale=30,  # Adjust base scale for better visibility
-                 width=0.002,  # Adjusts arrow width
-                 color='black',
-                 alpha=0.7)
+            # Flatten for plotting
+            arrow_lats_flat = arrow_lats_subset.flatten()
+            arrow_lons_flat = arrow_lons_subset.flatten()
+            arrow_dir_flat = arrow_dir_subset.flatten()
+            arrow_period_flat = arrow_period_subset.flatten()
+            
+            # Calculate dx, dy components for the subset
+            arrow_dx = []
+            arrow_dy = []
+            for k in range(len(arrow_dir_flat)):
+                if not np.isnan(arrow_dir_flat[k]) and not np.isnan(arrow_period_flat[k]):
+                    dir_rad = np.deg2rad(arrow_dir_flat[k] + 180) # Flip direction
+                    scale = arrow_period_flat[k] / 10.0 # Scale by period
+                    arrow_dx.append(np.sin(dir_rad) * scale)
+                    arrow_dy.append(np.cos(dir_rad) * scale)
+                else:
+                    # Append NaN if data is missing to maintain array alignment
+                    arrow_dx.append(np.nan) 
+                    arrow_dy.append(np.nan)
+            
+            # Filter out NaN coordinates before plotting (quiver doesn't handle them)
+            valid_indices = ~np.isnan(arrow_lats_flat) & ~np.isnan(arrow_lons_flat) & ~np.isnan(arrow_dx) & ~np.isnan(arrow_dy)
+            plot_lons = arrow_lons_flat[valid_indices]
+            plot_lats = arrow_lats_flat[valid_indices]
+            plot_dx = np.array(arrow_dx)[valid_indices]
+            plot_dy = np.array(arrow_dy)[valid_indices]
 
-        # Set map extent
-        ax.set_extent([min_lon, max_lon, min_lat, max_lat], crs=ccrs.PlateCarree())
+            logger.debug(f"Targeting ~{target_arrows_per_dim}x{target_arrows_per_dim} arrows. Strides: lat={stride_lat}, lon={stride_lon}. Number of arrows: {len(plot_lons)}")
+
+            # Add wave direction arrows for the subset
+            ax.quiver(plot_lons, plot_lats, plot_dx, plot_dy,
+                     transform=ccrs.PlateCarree(),
+                     scale=30,  # Adjust base scale for better visibility
+                     width=0.002,  # Adjusts arrow width
+                     headwidth=5,  # Increase headwidth (default is 3)
+                     headlength=5, # Increase headlength (default is 5, but tied to headwidth)
+                     color='black',
+                     alpha=0.7)
+            logger.debug("Added wave direction arrows (fixed number) to plot at original grid points (subset)")
+        except Exception as e:
+            logger.error(f"Error computing/plotting wave arrows: {e}", exc_info=True)
+            # Continue without arrows if there's an error
+
+        # Set map extent based on calculated mesh edges
+        try:
+            ax.set_extent([plot_min_lon, plot_max_lon, plot_min_lat, plot_max_lat], crs=ccrs.PlateCarree())
+            logger.debug(f"Set map extent from calculated mesh edges: ({plot_min_lon}, {plot_max_lon}, {plot_min_lat}, {plot_max_lat})")
+        except Exception as e:
+            logger.error(f"Error setting map extent: {e}", exc_info=True)
+            raise Exception(f"Error setting map extent: {e}")
 
         # Add title
         plt.title(title, pad=20, fontsize=14)
 
-        # Save plot to bytes buffer
+        # Save plot to bytes buffer (without bbox_inches='tight')
         buf = BytesIO()
-        plt.savefig(buf, format='png', bbox_inches='tight', dpi=150, 
+        plt.savefig(buf, format='png', dpi=150, 
                    pil_kwargs={'optimize': True, 'quality': 85})
         plt.close()
         buf.seek(0)

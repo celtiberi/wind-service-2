@@ -25,12 +25,19 @@ The API will be available at `http://localhost:8000`. The service automatically 
 ## API Endpoints
 
 ### POST /wind-data
-Get wind data and visualization for a specified region. You can specify the region either by coordinates or by name (e.g., 'Caribbean Sea').
+Get wind data and visualization for a specified region. You can specify the region either by name, point coordinates, or bounding box coordinates.
 
 Request body:
 ```json
 {
     "name": "Caribbean Sea"
+}
+```
+OR
+```json
+{
+    "lat": 20.090,
+    "lon": -83.502
 }
 ```
 OR
@@ -71,6 +78,29 @@ Response:
 ### POST /wave-data
 Get wave data and visualization for a specified region. Supports the same region specification methods as /wind-data.
 
+Request body:
+```json
+{
+    "name": "Caribbean Sea"
+}
+```
+OR
+```json
+{
+    "lat": 20.090,
+    "lon": -83.502
+}
+```
+OR
+```json
+{
+    "min_lat": 37.5,
+    "max_lat": 42.5,
+    "min_lon": -72.5,
+    "max_lon": -67.5
+}
+```
+
 Response includes wave height, period, and direction data:
 ```json
 {
@@ -99,7 +129,30 @@ Response includes wave height, period, and direction data:
 ```
 
 ### POST /marine-hazards
-Get comprehensive marine hazards data including wind, waves, and storm indicators for a region.
+Get comprehensive marine hazards data including wind, waves, and storm indicators for a region. Supports the same region specification methods as /wind-data.
+
+Request body:
+```json
+{
+    "name": "Caribbean Sea"
+}
+```
+OR
+```json
+{
+    "lat": 20.090,
+    "lon": -83.502
+}
+```
+OR
+```json
+{
+    "min_lat": 37.5,
+    "max_lat": 42.5,
+    "min_lon": -72.5,
+    "max_lon": -67.5
+}
+```
 
 Response includes combined hazard data and indicators:
 ```json
@@ -244,14 +297,29 @@ curl -X POST "http://localhost:8000/wind-data" \
   }' | jq -r '.image_base64' | base64 -d > wind_map.png
 ```
 
+Get wind data by point:
 ```bash
-curl -X POST "http://localhost:8000/wave-data" \
+curl -X POST "http://localhost:8000/wind-data" \
      -H "Content-Type: application/json" \
-     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > wave_map.png
+     -d '{"lat": 20.090, "lon": -83.502}' | jq -r '.image_base64' | base64 -d > wind_map.png
 ```
 
 ```bash
+curl -X POST "http://localhost:8000/wind-data" \
+     -H "Content-Type: application/json" \
+     -d '{"lat": 42.391, "lon": -30.366}' | jq -r '.image_base64' | base64 -d > wind_map.png
+```
+
+Get wave data by point:
+```bash
+curl -X POST "http://localhost:8000/wave-data" \
+     -H "Content-Type: application/json" \
+     -d '{"lat": 20.090, "lon": -83.502}' | jq -r '.image_base64' | base64 -d > wave_map.png
+```
+
+Get marine hazards by point:
+```bash
 curl -X POST "http://localhost:8000/marine-hazards" \
      -H "Content-Type: application/json" \
-     -d '{"name": "Caribbean Sea"}' | jq -r '.image_base64' | base64 -d > hazards_map.png
+     -d '{"lat": 20.090, "lon": -83.502}'
 ```

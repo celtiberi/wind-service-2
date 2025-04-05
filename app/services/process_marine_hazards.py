@@ -9,11 +9,11 @@ from typing import Tuple, List, Dict, Optional
 from datetime import datetime
 from .process_weather_data import ProcessWeatherData, logger
 import matplotlib.lines as mlines
-from app.models.schemas import GribFile
+from app.models.schemas import GribFile, BoundingBox
 
 class ProcessMarineHazards(ProcessWeatherData):
-    def process_data(self, min_lat: float, max_lat: float, min_lon: float, max_lon: float) -> Tuple[List[dict], str, datetime, GribFile, Optional[Dict], str]:
-        logger.info(f"Processing marine hazards for bounding box: ({min_lat}, {max_lat}, {min_lon}, {max_lon})")
+    def process_data(self, bbox: BoundingBox) -> Tuple[List[dict], str, datetime, GribFile, Optional[Dict], str]:
+        logger.info(f"Processing marine hazards for bounding box: {bbox}")
         
         if not self._wave_grib or not self._atmos_grib_file_data:
             raise ValueError("Atmospheric GRIB file not available")
@@ -22,7 +22,7 @@ class ProcessMarineHazards(ProcessWeatherData):
         try:
             gust_grb = self._wave_grib.select(name='Wind speed (gust)')[0]
             gust_data_full, lats_full, lons_full = gust_grb.data()
-            wind_speed_knots, lats, lons = self._slice_data_to_bounding_box(gust_data_full, lats_full, lons_full, min_lat, max_lat, min_lon, max_lon)
+            wind_speed_knots, lats, lons = self._slice_data_to_bounding_box(gust_data_full, lats_full, lons_full, bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon)
             wind_speed_knots = wind_speed_knots * 1.94384  # Convert m/s to knots
             max_wind_speed = np.nanmax(wind_speed_knots)
             logger.debug(f"Wind gusts (knots) range: {wind_speed_knots.min()} to {max_wind_speed}")
@@ -47,7 +47,7 @@ class ProcessMarineHazards(ProcessWeatherData):
 
         # Process storm and additional hazard indicators
         try:
-            hazard_indicators = self._process_hazard_indicators(min_lat, max_lat, min_lon, max_lon, lats_full, lons_full)
+            hazard_indicators = self._process_hazard_indicators(bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon, lats_full, lons_full)
             logger.info("Hazard indicators processed successfully")
         except Exception as e:
             logger.error(f"Error processing hazard indicators: {e}", exc_info=True)
@@ -55,7 +55,7 @@ class ProcessMarineHazards(ProcessWeatherData):
 
         # Generate and encode the plot
         try:
-            image_base64 = self._generate_plot(lats, lons, wind_speed_knots, min_lat, max_lat, min_lon, max_lon, 
+            image_base64 = self._generate_plot(lats, lons, wind_speed_knots, bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon, 
                                               gust_grb.validDate, self._atmos_grib_file_data, hazard_indicators=hazard_indicators)
             logger.info("Marine hazards plot generated successfully")
         except Exception as e:
@@ -63,7 +63,7 @@ class ProcessMarineHazards(ProcessWeatherData):
             raise Exception(f"Error generating marine hazards plot: {e}")
 
         # Generate text description
-        description = self._generate_description(hazard_indicators, max_wind_speed, min_lat, max_lat, min_lon, max_lon)
+        description = self._generate_description(hazard_indicators, max_wind_speed, bbox.min_lat, bbox.max_lat, bbox.min_lon, bbox.max_lon)
 
         # Remove spatial_data to avoid serialization issues
         if hazard_indicators and "spatial_data" in hazard_indicators:
